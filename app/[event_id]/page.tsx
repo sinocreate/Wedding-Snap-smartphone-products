@@ -18,10 +18,20 @@ import {
   ImagePlus,
   ImageIcon,
   Loader2,
+  Trash2,
+  Star,
+  Monitor,
+  Lock,
+  Unlock,
+  QrCode,
+  Copy,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-// URLの完全正規化（プロトコル + ホスト名のみを抽出してInvalid pathを根絶）
+// 1人あたりの投稿上限枚数（0 = 無制限）
+const MAX_UPLOAD_PER_USER = 0;
+
+// URL正規化
 const getCleanSupabaseUrl = () => {
   const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   try {
@@ -34,7 +44,6 @@ const getCleanSupabaseUrl = () => {
 
 const supabaseUrl = getCleanSupabaseUrl();
 const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
-
 const supabase = createClient(supabaseUrl, supabaseAnonKey || 'placeholder');
 
 interface Photo {
@@ -51,11 +60,17 @@ interface Photo {
   created_at: string;
 }
 
+interface EventData {
+  id: string;
+  title: string;
+  host_pin: string;
+}
+
 type FilterType = 'ranking' | 'pickup' | 'mine' | null;
 
-// クライアント側で瞬時に軽量サムネイルを生成する関数 (Canvas)
+// 軽量サムネイル即時生成
 const createThumbnailBlob = (file: File, maxDimension = 600, quality = 0.7): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       let { width, height } = img;
@@ -70,7 +85,6 @@ const createThumbnailBlob = (file: File, maxDimension = 600, quality = 0.7): Pro
           height = maxDimension;
         }
       }
-
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
@@ -80,15 +94,7 @@ const createThumbnailBlob = (file: File, maxDimension = 600, quality = 0.7): Pro
         return;
       }
       ctx.drawImage(img, 0, 0, width, height);
-
-      canvas.toBlob(
-        (blob) => {
-          if (blob) resolve(blob);
-          else resolve(file);
-        },
-        'image/jpeg',
-        quality
-      );
+      canvas.toBlob((blob) => resolve(blob || file), 'image/jpeg', quality);
     };
     img.onerror = () => resolve(file);
     img.src = URL.createObjectURL(file);
@@ -100,20 +106,27 @@ export default function EventPhotoGalleryPage() {
   const rawParam = Array.isArray(params?.event_id) ? params.event_id[0] : params?.event_id;
   const eventId = (rawParam || 'demo-wedding').replace(/[^a-zA-Z0-9_-]/g, '') || 'demo-wedding';
 
+  const [eventData, setEventData] = useState<EventData>({ id: eventId, title: 'Wedding Snap', host_pin: '1234' });
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterType>(null);
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
   const [userId, setUserId] = useState<string>('');
   const [myLikedPhotoIds, setMyLikedPhotoIds] = useState<string[]>([]);
   const [savedPhotoIds, setSavedPhotoIds] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
+  // モーダル・ドロワー状態管理
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [isHostMode, setIsHostMode] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const albumInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. 端末固有UUIDの管理
+  // 1. 端末UUID ＆ キャッシュ復元
   useEffect(() => {
     let localUserId = localStorage.getItem('wedding_guest_uuid');
     if (!localUserId) {
@@ -127,31 +140,37 @@ export default function EventPhotoGalleryPage() {
 
     const cachedSaves = localStorage.getItem(`saves_${eventId}`);
     if (cachedSaves) setSavedPhotoIds(JSON.parse(cachedSaves));
+
+    const hostSession = sessionStorage.getItem(`host_auth_${eventId}`);
+    if (hostSession === 'true') setIsHostMode(true);
   }, [eventId]);
 
-  // 2. 初期データロード ＆ Realtime同期
+  // 2. 初期データ取得 ＆ Realtime同期
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
-    const ensureEvent = async () => {
-      await supabase
-        .from('events')
-        .upsert({ id: eventId, title: 'Wedding Snap' }, { onConflict: 'id' });
+    // イベント取得または作成
+    const initEvent = async () => {
+      const { data } = await supabase.from('events').select('*').eq('id', eventId).single();
+      if (data) {
+        setEventData(data);
+      } else {
+        const defaultEvt = { id: eventId, title: 'Wedding Snap', host_pin: '1234' };
+        await supabase.from('events').upsert(defaultEvt);
+        setEventData(defaultEvt);
+      }
     };
-    ensureEvent();
+    initEvent();
 
     const fetchPhotos = async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('photos')
         .select('*')
         .eq('event_id', eventId)
         .order('created_at', { ascending: false });
 
-      if (!error && data) {
-        setPhotos(data as Photo[]);
-      }
+      if (data) setPhotos(data as Photo[]);
     };
-
     fetchPhotos();
 
     const channel = supabase
@@ -172,12 +191,10 @@ export default function EventPhotoGalleryPage() {
             });
           } else if (payload.eventType === 'UPDATE') {
             setPhotos((prev) =>
-              prev.map((photo) =>
-                photo.id === payload.new.id ? (payload.new as Photo) : photo
-              )
+              prev.map((p) => (p.id === payload.new.id ? (payload.new as Photo) : p))
             );
           } else if (payload.eventType === 'DELETE') {
-            setPhotos((prev) => prev.filter((photo) => photo.id === payload.old.id));
+            setPhotos((prev) => prev.filter((p) => p.id === payload.old.id));
           }
         }
       )
@@ -267,14 +284,17 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 6. 2段階アップロード処理 (低画質即時 ➔ 高画質非同期差し替え)
+  // 6. 2段階アップロード処理
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
-      alert(`設定エラー: Vercelの環境変数を確認してください。\nURL: ${supabaseUrl}`);
-      return;
+    if (MAX_UPLOAD_PER_USER > 0) {
+      const myCount = photos.filter((p) => p.user_id === userId).length;
+      if (myCount >= MAX_UPLOAD_PER_USER) {
+        alert(`写真の投稿は1人最大${MAX_UPLOAD_PER_USER}枚までです`);
+        return;
+      }
     }
 
     try {
@@ -286,9 +306,8 @@ export default function EventPhotoGalleryPage() {
       const thumbFileName = `thumb_${eventId}_${timestamp}_${rand}.jpg`;
       const originalFileName = `hd_${eventId}_${timestamp}_${rand}.jpg`;
 
-      // 【ステップ1】超軽量サムネイルの生成 & 即時アップロード
+      // サムネイル生成 ＆ 即時アップロード
       const thumbBlob = await createThumbnailBlob(file, 600, 0.7);
-
       const { data: thumbData, error: thumbError } = await supabase.storage
         .from('wedding-photos')
         .upload(thumbFileName, thumbBlob, {
@@ -296,15 +315,13 @@ export default function EventPhotoGalleryPage() {
           upsert: true,
         });
 
-      if (thumbError) {
-        throw new Error(`サムネイル送信失敗: ${thumbError.message}`);
-      }
+      if (thumbError) throw new Error(`サムネイル送信失敗: ${thumbError.message}`);
 
       const {
         data: { publicUrl: thumbPublicUrl },
       } = supabase.storage.from('wedding-photos').getPublicUrl(thumbData.path);
 
-      // 【ステップ2】即座にDB登録（グリッドに0.5秒で出現）
+      // DB即時挿入
       const { data: insertedPhoto, error: dbError } = await supabase
         .from('photos')
         .insert({
@@ -321,13 +338,11 @@ export default function EventPhotoGalleryPage() {
         .select()
         .single();
 
-      if (dbError) {
-        throw new Error(`DB保存失敗: ${dbError.message}`);
-      }
+      if (dbError) throw new Error(`DB保存失敗: ${dbError.message}`);
 
-      setIsUploading(false); // ユーザーには即座にアップロード完了を体感させる
+      setIsUploading(false);
 
-      // 【ステップ3】バックグラウンドでオリジナル高画質画像をアップロード
+      // バックグラウンド高画質アップロード
       (async () => {
         try {
           const { data: hdData, error: hdError } = await supabase.storage
@@ -342,14 +357,13 @@ export default function EventPhotoGalleryPage() {
               data: { publicUrl: hdPublicUrl },
             } = supabase.storage.from('wedding-photos').getPublicUrl(hdData.path);
 
-            // DBの高画質URLを差し替え
             await supabase.rpc('update_photo_hd', {
               p_photo_id: insertedPhoto.id,
               p_original_url: hdPublicUrl,
             });
           }
         } catch (bgErr) {
-          console.error('Background HD Upload Error:', bgErr);
+          console.error('HD Upload Error:', bgErr);
         }
       })();
     } catch (err: any) {
@@ -361,14 +375,64 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
+  // 7. ホスト専用操作（Pickupトグル & 削除）
+  const handleTogglePickup = async (photo: Photo, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newStatus = !photo.is_pickup;
+    setPhotos((prev) => prev.map((p) => (p.id === photo.id ? { ...p, is_pickup: newStatus } : p)));
+    await supabase.from('photos').update({ is_pickup: newStatus }).eq('id', photo.id);
+  };
+
+  const handleDeletePhoto = async (photo: Photo, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('この写真を削除しますか？（復元できません）')) return;
+
+    setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+    await supabase.from('photos').delete().eq('id', photo.id);
+    setSelectedCellId(null);
+  };
+
+  // ホストPIN認証チェック
+  const handleVerifyPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinInput === eventData.host_pin) {
+      setIsHostMode(true);
+      sessionStorage.setItem(`host_auth_${eventId}`, 'true');
+      setIsPinModalOpen(false);
+      setIsDrawerOpen(false);
+      setPinInput('');
+    } else {
+      alert('PINコードが正しくありません');
+    }
+  };
+
+  const handleLogoutHost = () => {
+    setIsHostMode(false);
+    sessionStorage.removeItem(`host_auth_${eventId}`);
+    setIsDrawerOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-[#F0EFEB] flex justify-center selection:bg-zinc-200">
       <main className="w-full max-w-md min-h-screen bg-white relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6rem)] overflow-y-auto overflow-x-hidden">
+        {/* ホストモード稼働中バナー */}
+        {isHostMode && (
+          <div className="sticky top-0 z-50 bg-amber-500 text-zinc-950 text-xs font-bold px-4 py-1.5 flex items-center justify-between shadow">
+            <span className="flex items-center space-x-1">
+              <Unlock className="w-3.5 h-3.5" />
+              <span>ホスト管理者モード中</span>
+            </span>
+            <button onClick={handleLogoutHost} className="underline text-[11px]">
+              終了
+            </button>
+          </div>
+        )}
+
         {/* (1) 固定すりガラスヘッダー */}
         <header className="sticky top-0 z-40 w-full bg-zinc-100/85 backdrop-blur-md border-b border-zinc-200/80 px-4 py-3 flex items-center justify-between">
           <div className="w-6" />
           <h1 className="font-serif italic text-[clamp(1.1rem,4.5vw,1.25rem)] tracking-wider text-zinc-800 select-none">
-            Wedding Snap
+            {eventData.title}
           </h1>
           <button
             onClick={() => setIsDrawerOpen(true)}
@@ -455,7 +519,7 @@ export default function EventPhotoGalleryPage() {
                 >
                   <img
                     src={displayUrl}
-                    alt="Wedding memory"
+                    alt="Wedding photo"
                     className="w-full h-full object-cover transition-opacity duration-300"
                     loading="lazy"
                   />
@@ -464,6 +528,13 @@ export default function EventPhotoGalleryPage() {
                   <span className="absolute bottom-1.5 left-1.5 text-[clamp(0.65rem,2.5vw,0.75rem)] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] z-10 pointer-events-none">
                     {photo.likes_count}
                   </span>
+
+                  {/* Pickupバッジ */}
+                  {photo.is_pickup && (
+                    <div className="absolute top-1.5 left-1.5 z-10 pointer-events-none">
+                      <Star className="w-4 h-4 fill-amber-400 text-amber-400 drop-shadow" />
+                    </div>
+                  )}
 
                   {/* 右下ハートトグル */}
                   <button
@@ -487,16 +558,38 @@ export default function EventPhotoGalleryPage() {
                     </div>
                   )}
 
-                  {/* セル選択オーバーレイ ＆ 保存ボタン */}
+                  {/* セル選択オーバーレイ */}
                   {isSelected && (
-                    <div className="absolute inset-0 bg-black/45 backdrop-blur-[1px] flex flex-col items-center justify-start pt-3 z-10 transition">
+                    <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px] flex flex-col items-center justify-center p-2 z-20 transition space-y-2">
                       <button
                         onClick={(e) => handleDownload(photo, e)}
-                        className="p-2 rounded-full bg-white/20 active:scale-90 transition"
+                        className="p-2.5 rounded-full bg-white/25 active:scale-90 transition flex items-center justify-center"
                         aria-label="画像を保存"
                       >
-                        <Download className="w-6 h-6 text-white" strokeWidth={2} />
+                        <Download className="w-5 h-5 text-white" strokeWidth={2} />
                       </button>
+
+                      {/* ホスト専用アクション（Pickup ＆ 削除） */}
+                      {isHostMode && (
+                        <div className="flex space-x-2 pt-1 border-t border-white/20">
+                          <button
+                            onClick={(e) => handleTogglePickup(photo, e)}
+                            className={`p-2 rounded-full active:scale-90 transition ${
+                              photo.is_pickup ? 'bg-amber-400 text-zinc-950' : 'bg-white/25 text-white'
+                            }`}
+                            title="Pickup切り替え"
+                          >
+                            <Star className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => handleDeletePhoto(photo, e)}
+                            className="p-2 rounded-full bg-red-500 text-white active:scale-90 transition"
+                            title="写真を削除"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -506,7 +599,7 @@ export default function EventPhotoGalleryPage() {
         )}
       </main>
 
-      {/* 隠しインプット（撮影用 ＆ アルバム用） */}
+      {/* 隠しインプット */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -523,7 +616,7 @@ export default function EventPhotoGalleryPage() {
         className="hidden"
       />
 
-      {/* (4) フローティング撮影/追加ボタン (FAB) */}
+      {/* (4) FAB */}
       <button
         disabled={isUploading}
         onClick={() => setIsActionSheetOpen(true)}
@@ -539,13 +632,10 @@ export default function EventPhotoGalleryPage() {
         )}
       </button>
 
-      {/* アクションシート */}
+      {/* 写真追加アクションシート */}
       {isActionSheetOpen && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end items-center bg-black/40 backdrop-blur-[2px]">
-          <div
-            className="absolute inset-0"
-            onClick={() => setIsActionSheetOpen(false)}
-          />
+          <div className="absolute inset-0" onClick={() => setIsActionSheetOpen(false)} />
           <div className="relative w-full max-w-md bg-white rounded-t-3xl p-6 shadow-2xl z-10 space-y-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] animate-in slide-in-from-bottom duration-200">
             <div className="w-10 h-1 bg-zinc-300 rounded-full mx-auto mb-2" />
             <h3 className="text-center font-bold text-zinc-800 text-sm mb-4">写真を追加する</h3>
@@ -595,18 +685,50 @@ export default function EventPhotoGalleryPage() {
                 </button>
               </div>
 
-              <nav className="mt-6 space-y-4">
-                <button className="flex items-center space-x-3 text-zinc-700 w-full py-2 px-1 text-left font-medium active:bg-zinc-50 rounded">
-                  <Share2 className="w-5 h-5 text-zinc-500" />
-                  <span>イベントを共有</span>
+              <nav className="mt-6 space-y-3">
+                <button
+                  onClick={() => {
+                    setIsDrawerOpen(false);
+                    setIsQrModalOpen(true);
+                  }}
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl"
+                >
+                  <QrCode className="w-5 h-5 text-zinc-500" />
+                  <span>参加用QRコード</span>
                 </button>
-                <button className="flex items-center space-x-3 text-zinc-700 w-full py-2 px-1 text-left font-medium active:bg-zinc-50 rounded">
-                  <HelpCircle className="w-5 h-5 text-zinc-500" />
-                  <span>使い方ガイド</span>
-                </button>
-                <button className="flex items-center space-x-3 text-zinc-700 w-full py-2 px-1 text-left font-medium active:bg-zinc-50 rounded">
-                  <Settings className="w-5 h-5 text-zinc-500" />
-                  <span>ホスト管理設定</span>
+
+                <a
+                  href={`/${eventId}/projector`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl"
+                >
+                  <Monitor className="w-5 h-5 text-indigo-500" />
+                  <span>プロジェクター投影画面</span>
+                </a>
+
+                <button
+                  onClick={() => {
+                    setIsDrawerOpen(false);
+                    if (isHostMode) {
+                      handleLogoutHost();
+                    } else {
+                      setIsPinModalOpen(true);
+                    }
+                  }}
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl"
+                >
+                  {isHostMode ? (
+                    <>
+                      <Unlock className="w-5 h-5 text-amber-500" />
+                      <span>ホスト管理を終了</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-5 h-5 text-zinc-500" />
+                      <span>ホスト管理設定</span>
+                    </>
+                  )}
                 </button>
               </nav>
             </div>
@@ -616,6 +738,87 @@ export default function EventPhotoGalleryPage() {
               <p>Wedding Snap v1.0.0</p>
             </div>
           </aside>
+        </div>
+      )}
+
+      {/* ホストPIN認証モーダル */}
+      {isPinModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl space-y-4">
+            <div className="text-center">
+              <Lock className="w-8 h-8 text-zinc-800 mx-auto mb-2" />
+              <h3 className="font-bold text-zinc-800 text-base">ホスト管理認証</h3>
+              <p className="text-xs text-zinc-400 mt-1">4桁のホストPINを入力してください</p>
+            </div>
+
+            <form onSubmit={handleVerifyPin} className="space-y-4">
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={8}
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                placeholder="PINコード (初期: 1234)"
+                className="w-full text-center tracking-widest text-2xl font-bold py-3 bg-zinc-100 rounded-2xl border-none focus:ring-2 focus:ring-zinc-800"
+                autoFocus
+              />
+
+              <div className="flex space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPinModalOpen(false)}
+                  className="w-1/2 py-3 text-sm font-medium text-zinc-500 bg-zinc-100 rounded-2xl"
+                >
+                  閉じる
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-3 text-sm font-medium text-white bg-zinc-900 rounded-2xl shadow"
+                >
+                  ロック解除
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* QRコード＆URL共有モーダル */}
+      {isQrModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl text-center space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-zinc-800 text-sm">会場配布用QRコード</h3>
+              <button onClick={() => setIsQrModalOpen(false)} className="p-1 text-zinc-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-zinc-50 rounded-2xl flex justify-center">
+              {/* QRコード画像API */}
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                  typeof window !== 'undefined' ? window.location.href : ''
+                )}`}
+                alt="QR Code"
+                className="w-48 h-48 rounded-lg"
+              />
+            </div>
+
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  navigator.clipboard.writeText(window.location.href);
+                  alert('URLをコピーしました！');
+                }
+              }}
+              className="w-full py-3 bg-zinc-900 text-white rounded-2xl text-xs font-medium flex items-center justify-center space-x-2 active:scale-98 transition shadow"
+            >
+              <Copy className="w-4 h-4" />
+              <span>参加URLをコピー</span>
+            </button>
+          </div>
         </div>
       )}
     </div>
