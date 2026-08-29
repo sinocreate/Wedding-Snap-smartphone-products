@@ -28,10 +28,8 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-// 1人あたりの投稿上限枚数（0 = 無制限）
 const MAX_UPLOAD_PER_USER = 0;
 
-// URL正規化
 const getCleanSupabaseUrl = () => {
   const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   try {
@@ -68,7 +66,6 @@ interface EventData {
 
 type FilterType = 'ranking' | 'pickup' | 'mine' | null;
 
-// 軽量サムネイル即時生成
 const createThumbnailBlob = (file: File, maxDimension = 600, quality = 0.7): Promise<Blob> => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -109,13 +106,15 @@ export default function EventPhotoGalleryPage() {
   const [eventData, setEventData] = useState<EventData>({ id: eventId, title: 'Wedding Snap', host_pin: '1234' });
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterType>(null);
-  const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
+  
+  // 拡大モーダル用の写真オブジェクト
+  const [previewPhoto, setPreviewPhoto] = useState<Photo | null>(null);
+
   const [userId, setUserId] = useState<string>('');
   const [myLikedPhotoIds, setMyLikedPhotoIds] = useState<string[]>([]);
   const [savedPhotoIds, setSavedPhotoIds] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
-  // モーダル・ドロワー状態管理
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
@@ -126,7 +125,6 @@ export default function EventPhotoGalleryPage() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const albumInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. 端末UUID ＆ キャッシュ復元
   useEffect(() => {
     let localUserId = localStorage.getItem('wedding_guest_uuid');
     if (!localUserId) {
@@ -145,11 +143,9 @@ export default function EventPhotoGalleryPage() {
     if (hostSession === 'true') setIsHostMode(true);
   }, [eventId]);
 
-  // 2. 初期データ取得 ＆ Realtime同期
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
-    // イベント取得または作成
     const initEvent = async () => {
       const { data } = await supabase.from('events').select('*').eq('id', eventId).single();
       if (data) {
@@ -190,11 +186,12 @@ export default function EventPhotoGalleryPage() {
               return exists ? prev : [payload.new as Photo, ...prev];
             });
           } else if (payload.eventType === 'UPDATE') {
-            setPhotos((prev) =>
-              prev.map((p) => (p.id === payload.new.id ? (payload.new as Photo) : p))
-            );
+            const updated = payload.new as Photo;
+            setPhotos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+            setPreviewPhoto((prev) => (prev?.id === updated.id ? updated : prev));
           } else if (payload.eventType === 'DELETE') {
             setPhotos((prev) => prev.filter((p) => p.id === payload.old.id));
+            setPreviewPhoto((prev) => (prev?.id === payload.old.id ? null : prev));
           }
         }
       )
@@ -205,7 +202,6 @@ export default function EventPhotoGalleryPage() {
     };
   }, [eventId]);
 
-  // 3. フィルタリング
   const filteredPhotos = useMemo(() => {
     let result = [...photos];
     if (activeFilter === 'ranking') {
@@ -218,9 +214,8 @@ export default function EventPhotoGalleryPage() {
     return result;
   }, [photos, activeFilter, userId]);
 
-  // 4. いいねトグル
-  const toggleLike = async (photoId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggleLike = async (photoId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     const isLiked = myLikedPhotoIds.includes(photoId);
 
     if (!isLiked && myLikedPhotoIds.length >= 3) {
@@ -247,6 +242,17 @@ export default function EventPhotoGalleryPage() {
       })
     );
 
+    if (previewPhoto && previewPhoto.id === photoId) {
+      setPreviewPhoto((prev) =>
+        prev
+          ? {
+              ...prev,
+              likes_count: isLiked ? Math.max(0, prev.likes_count - 1) : prev.likes_count + 1,
+            }
+          : null
+      );
+    }
+
     try {
       await supabase.rpc('toggle_photo_like', {
         p_event_id: eventId,
@@ -258,9 +264,8 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 5. 画像保存
-  const handleDownload = async (photo: Photo, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDownload = async (photo: Photo, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     try {
       const downloadTargetUrl = photo.original_url || photo.public_url;
       const response = await fetch(downloadTargetUrl);
@@ -284,7 +289,6 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 6. 2段階アップロード処理
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -306,7 +310,6 @@ export default function EventPhotoGalleryPage() {
       const thumbFileName = `thumb_${eventId}_${timestamp}_${rand}.jpg`;
       const originalFileName = `hd_${eventId}_${timestamp}_${rand}.jpg`;
 
-      // サムネイル生成 ＆ 即時アップロード
       const thumbBlob = await createThumbnailBlob(file, 600, 0.7);
       const { data: thumbData, error: thumbError } = await supabase.storage
         .from('wedding-photos')
@@ -321,7 +324,6 @@ export default function EventPhotoGalleryPage() {
         data: { publicUrl: thumbPublicUrl },
       } = supabase.storage.from('wedding-photos').getPublicUrl(thumbData.path);
 
-      // DB即時挿入
       const { data: insertedPhoto, error: dbError } = await supabase
         .from('photos')
         .insert({
@@ -342,7 +344,6 @@ export default function EventPhotoGalleryPage() {
 
       setIsUploading(false);
 
-      // バックグラウンド高画質アップロード
       (async () => {
         try {
           const { data: hdData, error: hdError } = await supabase.storage
@@ -375,24 +376,25 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 7. ホスト専用操作（Pickupトグル & 削除）
-  const handleTogglePickup = async (photo: Photo, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleTogglePickup = async (photo: Photo, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     const newStatus = !photo.is_pickup;
     setPhotos((prev) => prev.map((p) => (p.id === photo.id ? { ...p, is_pickup: newStatus } : p)));
+    if (previewPhoto && previewPhoto.id === photo.id) {
+      setPreviewPhoto((prev) => (prev ? { ...prev, is_pickup: newStatus } : null));
+    }
     await supabase.from('photos').update({ is_pickup: newStatus }).eq('id', photo.id);
   };
 
-  const handleDeletePhoto = async (photo: Photo, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDeletePhoto = async (photo: Photo, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!confirm('この写真を削除しますか？（復元できません）')) return;
 
     setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+    if (previewPhoto?.id === photo.id) setPreviewPhoto(null);
     await supabase.from('photos').delete().eq('id', photo.id);
-    setSelectedCellId(null);
   };
 
-  // ホストPIN認証チェック
   const handleVerifyPin = (e: React.FormEvent) => {
     e.preventDefault();
     if (pinInput === eventData.host_pin) {
@@ -415,7 +417,6 @@ export default function EventPhotoGalleryPage() {
   return (
     <div className="min-h-screen bg-[#F0EFEB] flex justify-center selection:bg-zinc-200">
       <main className="w-full max-w-md min-h-screen bg-white relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6rem)] overflow-y-auto overflow-x-hidden">
-        {/* ホストモード稼働中バナー */}
         {isHostMode && (
           <div className="sticky top-0 z-50 bg-amber-500 text-zinc-950 text-xs font-bold px-4 py-1.5 flex items-center justify-between shadow">
             <span className="flex items-center space-x-1">
@@ -428,7 +429,7 @@ export default function EventPhotoGalleryPage() {
           </div>
         )}
 
-        {/* (1) 固定すりガラスヘッダー */}
+        {/* (1) 固定ヘッダー */}
         <header className="sticky top-0 z-40 w-full bg-zinc-100/85 backdrop-blur-md border-b border-zinc-200/80 px-4 py-3 flex items-center justify-between">
           <div className="w-6" />
           <h1 className="font-serif italic text-[clamp(1.1rem,4.5vw,1.25rem)] tracking-wider text-zinc-800 select-none">
@@ -508,14 +509,13 @@ export default function EventPhotoGalleryPage() {
             {filteredPhotos.map((photo) => {
               const isLiked = myLikedPhotoIds.includes(photo.id);
               const isSaved = savedPhotoIds.includes(photo.id);
-              const isSelected = selectedCellId === photo.id;
               const displayUrl = photo.thumb_url || photo.public_url;
 
               return (
                 <div
                   key={photo.id}
-                  onClick={() => setSelectedCellId(isSelected ? null : photo.id)}
-                  className="w-full aspect-square relative overflow-hidden bg-zinc-100 cursor-pointer select-none"
+                  onClick={() => setPreviewPhoto(photo)}
+                  className="w-full aspect-square relative overflow-hidden bg-zinc-100 cursor-pointer select-none active:opacity-90"
                 >
                   <img
                     src={displayUrl}
@@ -557,47 +557,91 @@ export default function EventPhotoGalleryPage() {
                       <CheckCircle2 className="w-4 h-4 fill-emerald-500 text-white drop-shadow" />
                     </div>
                   )}
-
-                  {/* セル選択オーバーレイ */}
-                  {isSelected && (
-                    <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px] flex flex-col items-center justify-center p-2 z-20 transition space-y-2">
-                      <button
-                        onClick={(e) => handleDownload(photo, e)}
-                        className="p-2.5 rounded-full bg-white/25 active:scale-90 transition flex items-center justify-center"
-                        aria-label="画像を保存"
-                      >
-                        <Download className="w-5 h-5 text-white" strokeWidth={2} />
-                      </button>
-
-                      {/* ホスト専用アクション（Pickup ＆ 削除） */}
-                      {isHostMode && (
-                        <div className="flex space-x-2 pt-1 border-t border-white/20">
-                          <button
-                            onClick={(e) => handleTogglePickup(photo, e)}
-                            className={`p-2 rounded-full active:scale-90 transition ${
-                              photo.is_pickup ? 'bg-amber-400 text-zinc-950' : 'bg-white/25 text-white'
-                            }`}
-                            title="Pickup切り替え"
-                          >
-                            <Star className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={(e) => handleDeletePhoto(photo, e)}
-                            className="p-2 rounded-full bg-red-500 text-white active:scale-90 transition"
-                            title="写真を削除"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
         )}
       </main>
+
+      {/* 画面8割占有の美麗プレビューモーダル（ユーザーファーストUI） */}
+      {previewPhoto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="absolute inset-0" onClick={() => setPreviewPhoto(null)} />
+
+          <div className="relative w-full max-w-sm max-h-[85vh] flex flex-col items-center justify-between z-10">
+            {/* 上部閉じるボタン */}
+            <div className="w-full flex justify-end pb-2">
+              <button
+                onClick={() => setPreviewPhoto(null)}
+                className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20 active:scale-95 transition"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* 写真本体（アスペクト比維持で最大化） */}
+            <div className="w-full max-h-[60vh] flex items-center justify-center rounded-2xl overflow-hidden bg-black/40 shadow-2xl">
+              <img
+                src={previewPhoto.original_url || previewPhoto.public_url}
+                alt="Enlarged photo"
+                className="w-auto h-auto max-h-[60vh] max-w-full object-contain rounded-2xl"
+              />
+            </div>
+
+            {/* 下部アクションバー */}
+            <div className="w-full mt-4 bg-zinc-900/90 backdrop-blur-md rounded-2xl px-5 py-3.5 flex items-center justify-between shadow-2xl border border-white/10">
+              {/* いいねボタングループ */}
+              <button
+                onClick={() => toggleLike(previewPhoto.id)}
+                className="flex items-center space-x-2 text-white active:scale-95 transition"
+              >
+                <Heart
+                  className={`w-6 h-6 ${
+                    myLikedPhotoIds.includes(previewPhoto.id)
+                      ? 'fill-pink-500 text-pink-500'
+                      : 'text-zinc-300'
+                  }`}
+                />
+                <span className="font-bold text-sm text-zinc-100">{previewPhoto.likes_count}</span>
+              </button>
+
+              {/* 保存ボタン */}
+              <button
+                onClick={() => handleDownload(previewPhoto)}
+                className="flex items-center space-x-1.5 px-4 py-2 bg-white/15 hover:bg-white/25 active:scale-95 text-white rounded-xl text-xs font-semibold transition"
+              >
+                <Download className="w-4 h-4" />
+                <span>{savedPhotoIds.includes(previewPhoto.id) ? '保存済み' : '端末に保存'}</span>
+              </button>
+
+              {/* ホスト専用管理ボタン */}
+              {isHostMode && (
+                <div className="flex items-center space-x-2 pl-2 border-l border-white/20">
+                  <button
+                    onClick={() => handleTogglePickup(previewPhoto)}
+                    className={`p-2 rounded-xl active:scale-95 transition ${
+                      previewPhoto.is_pickup
+                        ? 'bg-amber-400 text-zinc-950 font-bold'
+                        : 'bg-white/15 text-white'
+                    }`}
+                    title="Pickup"
+                  >
+                    <Star className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDeletePhoto(previewPhoto)}
+                    className="p-2 rounded-xl bg-red-500/80 text-white active:scale-95 transition"
+                    title="削除"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 隠しインプット */}
       <input
@@ -632,7 +676,7 @@ export default function EventPhotoGalleryPage() {
         )}
       </button>
 
-      {/* 写真追加アクションシート */}
+      {/* アクションシート */}
       {isActionSheetOpen && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end items-center bg-black/40 backdrop-blur-[2px]">
           <div className="absolute inset-0" onClick={() => setIsActionSheetOpen(false)} />
@@ -784,7 +828,7 @@ export default function EventPhotoGalleryPage() {
         </div>
       )}
 
-      {/* QRコード＆URL共有モーダル */}
+      {/* QRコードモーダル */}
       {isQrModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl text-center space-y-4">
@@ -796,7 +840,6 @@ export default function EventPhotoGalleryPage() {
             </div>
 
             <div className="p-3 bg-zinc-50 rounded-2xl flex justify-center">
-              {/* QRコード画像API */}
               <img
                 src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
                   typeof window !== 'undefined' ? window.location.href : ''
