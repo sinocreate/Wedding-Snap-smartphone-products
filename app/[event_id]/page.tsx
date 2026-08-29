@@ -17,23 +17,34 @@ import {
   HelpCircle,
   ImagePlus,
   ImageIcon,
+  Loader2,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase クライアント初期化
-const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+// URLの完全正規化（プロトコル + ホスト名のみを抽出してInvalid pathを根絶）
+const getCleanSupabaseUrl = () => {
+  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  try {
+    const parsed = new URL(envUrl.startsWith('http') ? envUrl : `https://${envUrl}`);
+    return parsed.origin;
+  } catch {
+    return 'https://placeholder.supabase.co';
+  }
+};
+
+const supabaseUrl = getCleanSupabaseUrl();
 const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
 
-const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder'
-);
+const supabase = createClient(supabaseUrl, supabaseAnonKey || 'placeholder');
 
 interface Photo {
   id: string;
   event_id: string;
   storage_path: string;
   public_url: string;
+  thumb_url?: string;
+  original_url?: string;
+  is_hd_ready?: boolean;
   user_id: string;
   likes_count: number;
   is_pickup: boolean;
@@ -42,9 +53,50 @@ interface Photo {
 
 type FilterType = 'ranking' | 'pickup' | 'mine' | null;
 
+// クライアント側で瞬時に軽量サムネイルを生成する関数 (Canvas)
+const createThumbnailBlob = (file: File, maxDimension = 600, quality = 0.7): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > height) {
+        if (width > maxDimension) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        }
+      } else {
+        if (height > maxDimension) {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob);
+          else resolve(file);
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+    img.onerror = () => resolve(file);
+    img.src = URL.createObjectURL(file);
+  });
+};
+
 export default function EventPhotoGalleryPage() {
   const params = useParams();
-  // パラメータが空の場合でも安全なデフォルト値を設定
   const rawParam = Array.isArray(params?.event_id) ? params.event_id[0] : params?.event_id;
   const eventId = (rawParam || 'demo-wedding').replace(/[^a-zA-Z0-9_-]/g, '') || 'demo-wedding';
 
@@ -61,7 +113,7 @@ export default function EventPhotoGalleryPage() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const albumInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. 端末固有ID ＆ キャッシュ復元
+  // 1. 端末固有UUIDの管理
   useEffect(() => {
     let localUserId = localStorage.getItem('wedding_guest_uuid');
     if (!localUserId) {
@@ -77,11 +129,10 @@ export default function EventPhotoGalleryPage() {
     if (cachedSaves) setSavedPhotoIds(JSON.parse(cachedSaves));
   }, [eventId]);
 
-  // 2. 写真一覧取得 ＆ リアルタイム同期
+  // 2. 初期データロード ＆ Realtime同期
   useEffect(() => {
-    if (!supabaseUrl || !supabaseAnonKey) return;
+    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
-    // イベントの存在を保証
     const ensureEvent = async () => {
       await supabase
         .from('events')
@@ -194,7 +245,8 @@ export default function EventPhotoGalleryPage() {
   const handleDownload = async (photo: Photo, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const response = await fetch(photo.public_url);
+      const downloadTargetUrl = photo.original_url || photo.public_url;
+      const response = await fetch(downloadTargetUrl);
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -215,13 +267,13 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 6. 画像アップロード（スラッシュのない完全安全なパス設計）
+  // 6. 2段階アップロード処理 (低画質即時 ➔ 高画質非同期差し替え)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
-      alert('Vercelの環境変数（SUPABASE_URL / ANON_KEY）が未設定です');
+      alert(`設定エラー: Vercelの環境変数を確認してください。\nURL: ${supabaseUrl}`);
       return;
     }
 
@@ -229,48 +281,81 @@ export default function EventPhotoGalleryPage() {
       setIsUploading(true);
       setIsActionSheetOpen(false);
 
-      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
-      const cleanExt = ext.replace(/[^a-z0-9]/g, '') || 'jpg';
-      const randomStr = Math.random().toString(36).substring(2, 10);
-      
-      // スラッシュを含まないフラットなファイル名（Storageエラーを完全回避）
-      const safeFileName = `${eventId}_${Date.now()}_${randomStr}.${cleanExt}`;
+      const timestamp = Date.now();
+      const rand = Math.random().toString(36).substring(2, 8);
+      const thumbFileName = `thumb_${eventId}_${timestamp}_${rand}.jpg`;
+      const originalFileName = `hd_${eventId}_${timestamp}_${rand}.jpg`;
 
-      // Storageアップロード
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      // 【ステップ1】超軽量サムネイルの生成 & 即時アップロード
+      const thumbBlob = await createThumbnailBlob(file, 600, 0.7);
+
+      const { data: thumbData, error: thumbError } = await supabase.storage
         .from('wedding-photos')
-        .upload(safeFileName, file, {
-          cacheControl: '3600',
-          contentType: file.type || 'image/jpeg',
+        .upload(thumbFileName, thumbBlob, {
+          contentType: 'image/jpeg',
           upsert: true,
         });
 
-      if (uploadError) {
-        throw new Error(`Storageエラー: ${uploadError.message}`);
+      if (thumbError) {
+        throw new Error(`サムネイル送信失敗: ${thumbError.message}`);
       }
 
-      // 公開URL取得
       const {
-        data: { publicUrl },
-      } = supabase.storage.from('wedding-photos').getPublicUrl(uploadData.path);
+        data: { publicUrl: thumbPublicUrl },
+      } = supabase.storage.from('wedding-photos').getPublicUrl(thumbData.path);
 
-      // データベース登録
-      const { error: dbError } = await supabase.from('photos').insert({
-        event_id: eventId,
-        storage_path: uploadData.path,
-        public_url: publicUrl,
-        user_id: userId,
-        likes_count: 0,
-        is_pickup: false,
-      });
+      // 【ステップ2】即座にDB登録（グリッドに0.5秒で出現）
+      const { data: insertedPhoto, error: dbError } = await supabase
+        .from('photos')
+        .insert({
+          event_id: eventId,
+          storage_path: thumbData.path,
+          public_url: thumbPublicUrl,
+          thumb_url: thumbPublicUrl,
+          original_url: null,
+          is_hd_ready: false,
+          user_id: userId,
+          likes_count: 0,
+          is_pickup: false,
+        })
+        .select()
+        .single();
 
       if (dbError) {
-        throw new Error(`DBエラー: ${dbError.message}`);
+        throw new Error(`DB保存失敗: ${dbError.message}`);
       }
+
+      setIsUploading(false); // ユーザーには即座にアップロード完了を体感させる
+
+      // 【ステップ3】バックグラウンドでオリジナル高画質画像をアップロード
+      (async () => {
+        try {
+          const { data: hdData, error: hdError } = await supabase.storage
+            .from('wedding-photos')
+            .upload(originalFileName, file, {
+              contentType: file.type || 'image/jpeg',
+              upsert: true,
+            });
+
+          if (!hdError && hdData) {
+            const {
+              data: { publicUrl: hdPublicUrl },
+            } = supabase.storage.from('wedding-photos').getPublicUrl(hdData.path);
+
+            // DBの高画質URLを差し替え
+            await supabase.rpc('update_photo_hd', {
+              p_photo_id: insertedPhoto.id,
+              p_original_url: hdPublicUrl,
+            });
+          }
+        } catch (bgErr) {
+          console.error('Background HD Upload Error:', bgErr);
+        }
+      })();
     } catch (err: any) {
       alert(err.message || 'アップロードに失敗しました');
-    } finally {
       setIsUploading(false);
+    } finally {
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       if (albumInputRef.current) albumInputRef.current.value = '';
     }
@@ -278,7 +363,6 @@ export default function EventPhotoGalleryPage() {
 
   return (
     <div className="min-h-screen bg-[#F0EFEB] flex justify-center selection:bg-zinc-200">
-      {/* メインコンテナ（横幅100%フィット） */}
       <main className="w-full max-w-md min-h-screen bg-white relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6rem)] overflow-y-auto overflow-x-hidden">
         {/* (1) 固定すりガラスヘッダー */}
         <header className="sticky top-0 z-40 w-full bg-zinc-100/85 backdrop-blur-md border-b border-zinc-200/80 px-4 py-3 flex items-center justify-between">
@@ -361,6 +445,7 @@ export default function EventPhotoGalleryPage() {
               const isLiked = myLikedPhotoIds.includes(photo.id);
               const isSaved = savedPhotoIds.includes(photo.id);
               const isSelected = selectedCellId === photo.id;
+              const displayUrl = photo.thumb_url || photo.public_url;
 
               return (
                 <div
@@ -369,9 +454,9 @@ export default function EventPhotoGalleryPage() {
                   className="w-full aspect-square relative overflow-hidden bg-zinc-100 cursor-pointer select-none"
                 >
                   <img
-                    src={photo.public_url}
+                    src={displayUrl}
                     alt="Wedding memory"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover transition-opacity duration-300"
                     loading="lazy"
                   />
 
@@ -402,7 +487,7 @@ export default function EventPhotoGalleryPage() {
                     </div>
                   )}
 
-                  {/* タップ時の周辺減光オーバーレイ ＆ 保存アイコン */}
+                  {/* セル選択オーバーレイ ＆ 保存ボタン */}
                   {isSelected && (
                     <div className="absolute inset-0 bg-black/45 backdrop-blur-[1px] flex flex-col items-center justify-start pt-3 z-10 transition">
                       <button
@@ -421,7 +506,7 @@ export default function EventPhotoGalleryPage() {
         )}
       </main>
 
-      {/* 隠しインプット（撮影用 ＆ アルバム選択用） */}
+      {/* 隠しインプット（撮影用 ＆ アルバム用） */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -443,14 +528,18 @@ export default function EventPhotoGalleryPage() {
         disabled={isUploading}
         onClick={() => setIsActionSheetOpen(true)}
         className={`fixed bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] right-4 sm:right-[max(1rem,calc(50%-224px+1rem))] z-40 w-14 h-14 rounded-full bg-white shadow-xl flex items-center justify-center border border-zinc-100 active:scale-90 transition-transform ${
-          isUploading ? 'opacity-50 animate-pulse' : ''
+          isUploading ? 'opacity-70' : ''
         }`}
         aria-label="写真を追加"
       >
-        <Camera className="w-7 h-7 text-zinc-900" strokeWidth={1.5} />
+        {isUploading ? (
+          <Loader2 className="w-6 h-6 text-zinc-900 animate-spin" />
+        ) : (
+          <Camera className="w-7 h-7 text-zinc-900" strokeWidth={1.5} />
+        )}
       </button>
 
-      {/* 写真追加アクションシート（撮影 or アルバム選択） */}
+      {/* アクションシート */}
       {isActionSheetOpen && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end items-center bg-black/40 backdrop-blur-[2px]">
           <div
@@ -487,7 +576,7 @@ export default function EventPhotoGalleryPage() {
         </div>
       )}
 
-      {/* (1-b) 右スライドインドロワー */}
+      {/* ドロワーメニュー */}
       {isDrawerOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div
