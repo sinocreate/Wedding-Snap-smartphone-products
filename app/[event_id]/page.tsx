@@ -20,12 +20,14 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase クライアント初期化（URLの末尾スラッシュを自動除去してパス異常を防止）
-const rawSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseUrl = rawSupabaseUrl.replace(/\/+$/, '');
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// Supabase クライアント初期化
+const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
 
-const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder');
+const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder'
+);
 
 interface Photo {
   id: string;
@@ -42,8 +44,9 @@ type FilterType = 'ranking' | 'pickup' | 'mine' | null;
 
 export default function EventPhotoGalleryPage() {
   const params = useParams();
-  const rawEventId = (params?.event_id as string) || 'demo-wedding';
-  const eventId = rawEventId.replace(/[^a-zA-Z0-9_-]/g, '');
+  // パラメータが空の場合でも安全なデフォルト値を設定
+  const rawParam = Array.isArray(params?.event_id) ? params.event_id[0] : params?.event_id;
+  const eventId = (rawParam || 'demo-wedding').replace(/[^a-zA-Z0-9_-]/g, '') || 'demo-wedding';
 
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterType>(null);
@@ -55,7 +58,6 @@ export default function EventPhotoGalleryPage() {
   const [savedPhotoIds, setSavedPhotoIds] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
-  // 撮影用とアルバム選択用の2つの隠しinput
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const albumInputRef = useRef<HTMLInputElement>(null);
 
@@ -77,14 +79,15 @@ export default function EventPhotoGalleryPage() {
 
   // 2. 写真一覧取得 ＆ リアルタイム同期
   useEffect(() => {
-    if (!eventId || !supabaseUrl || !supabaseAnonKey) return;
+    if (!supabaseUrl || !supabaseAnonKey) return;
 
-    const ensureEventExists = async () => {
+    // イベントの存在を保証
+    const ensureEvent = async () => {
       await supabase
         .from('events')
         .upsert({ id: eventId, title: 'Wedding Snap' }, { onConflict: 'id' });
     };
-    ensureEventExists();
+    ensureEvent();
 
     const fetchPhotos = async () => {
       const { data, error } = await supabase
@@ -212,13 +215,13 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 6. 画像アップロード処理
+  // 6. 画像アップロード（スラッシュのない完全安全なパス設計）
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !eventId) return;
+    if (!file) return;
 
-    if (!supabaseUrl || !supabaseAnonKey) {
-      alert('Supabaseの環境変数が設定されていません。Vercelの設定を確認してください。');
+    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
+      alert('Vercelの環境変数（SUPABASE_URL / ANON_KEY）が未設定です');
       return;
     }
 
@@ -226,28 +229,32 @@ export default function EventPhotoGalleryPage() {
       setIsUploading(true);
       setIsActionSheetOpen(false);
 
-      const rawExt = file.name.split('.').pop() || 'jpg';
-      const cleanExt = rawExt.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      // 確実なプレーンファイル名
-      const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${cleanExt}`;
-      const storageFilePath = `${eventId}/${uniqueName}`;
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const cleanExt = ext.replace(/[^a-z0-9]/g, '') || 'jpg';
+      const randomStr = Math.random().toString(36).substring(2, 10);
+      
+      // スラッシュを含まないフラットなファイル名（Storageエラーを完全回避）
+      const safeFileName = `${eventId}_${Date.now()}_${randomStr}.${cleanExt}`;
 
+      // Storageアップロード
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('wedding-photos')
-        .upload(storageFilePath, file, {
+        .upload(safeFileName, file, {
           cacheControl: '3600',
           contentType: file.type || 'image/jpeg',
           upsert: true,
         });
 
       if (uploadError) {
-        throw new Error(`Storage: ${uploadError.message}`);
+        throw new Error(`Storageエラー: ${uploadError.message}`);
       }
 
+      // 公開URL取得
       const {
         data: { publicUrl },
       } = supabase.storage.from('wedding-photos').getPublicUrl(uploadData.path);
 
+      // データベース登録
       const { error: dbError } = await supabase.from('photos').insert({
         event_id: eventId,
         storage_path: uploadData.path,
@@ -258,7 +265,7 @@ export default function EventPhotoGalleryPage() {
       });
 
       if (dbError) {
-        throw new Error(`Database: ${dbError.message}`);
+        throw new Error(`DBエラー: ${dbError.message}`);
       }
     } catch (err: any) {
       alert(err.message || 'アップロードに失敗しました');
@@ -368,10 +375,12 @@ export default function EventPhotoGalleryPage() {
                     loading="lazy"
                   />
 
+                  {/* 左下いいね数 */}
                   <span className="absolute bottom-1.5 left-1.5 text-[clamp(0.65rem,2.5vw,0.75rem)] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] z-10 pointer-events-none">
                     {photo.likes_count}
                   </span>
 
+                  {/* 右下ハートトグル */}
                   <button
                     onClick={(e) => toggleLike(photo.id, e)}
                     className="absolute bottom-1.5 right-1.5 z-20 p-1 active:scale-125 transition"
@@ -386,12 +395,14 @@ export default function EventPhotoGalleryPage() {
                     />
                   </button>
 
+                  {/* 右上保存済みバッジ */}
                   {isSaved && (
                     <div className="absolute top-1.5 right-1.5 z-10 pointer-events-none">
                       <CheckCircle2 className="w-4 h-4 fill-emerald-500 text-white drop-shadow" />
                     </div>
                   )}
 
+                  {/* タップ時の周辺減光オーバーレイ ＆ 保存アイコン */}
                   {isSelected && (
                     <div className="absolute inset-0 bg-black/45 backdrop-blur-[1px] flex flex-col items-center justify-start pt-3 z-10 transition">
                       <button
