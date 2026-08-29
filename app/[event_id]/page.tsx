@@ -38,7 +38,9 @@ type FilterType = 'ranking' | 'pickup' | 'mine' | null;
 
 export default function EventPhotoGalleryPage() {
   const params = useParams();
-  const eventId = (params?.event_id as string) || 'demo-wedding';
+  const rawEventId = (params?.event_id as string) || 'demo-wedding';
+  // パスセーフなイベントIDに整形
+  const eventId = rawEventId.replace(/[^a-zA-Z0-9_-]/g, '');
 
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterType>(null);
@@ -70,13 +72,11 @@ export default function EventPhotoGalleryPage() {
   useEffect(() => {
     if (!eventId) return;
 
-    // イベントレコードが未存在の場合は自動作成
+    // イベントレコードの確保
     const ensureEventExists = async () => {
       await supabase
         .from('events')
-        .insert({ id: eventId, title: 'Wedding Snap' })
-        .select()
-        .single();
+        .upsert({ id: eventId, title: 'Wedding Snap' }, { onConflict: 'id' });
     };
     ensureEventExists();
 
@@ -106,7 +106,10 @@ export default function EventPhotoGalleryPage() {
         },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setPhotos((prev) => [payload.new as Photo, ...prev]);
+            setPhotos((prev) => {
+              const exists = prev.some((p) => p.id === (payload.new as Photo).id);
+              return exists ? prev : [payload.new as Photo, ...prev];
+            });
           } else if (payload.eventType === 'UPDATE') {
             setPhotos((prev) =>
               prev.map((photo) =>
@@ -174,7 +177,7 @@ export default function EventPhotoGalleryPage() {
         p_photo_id: photoId,
         p_user_id: userId,
       });
-    } catch (err: any) {
+    } catch (err) {
       console.error('Like error:', err);
     }
   };
@@ -211,14 +214,16 @@ export default function EventPhotoGalleryPage() {
 
     try {
       setIsUploading(true);
-      const fileExt = file.name.split('.').pop() || 'jpg';
-      const cleanFileName = `${eventId}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+      const rawExt = file.name.split('.').pop() || 'jpg';
+      const cleanExt = rawExt.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+      const fileName = `${eventId}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${cleanExt}`;
 
       // Storageアップロード
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('wedding-photos')
-        .upload(cleanFileName, file, {
+        .upload(fileName, file, {
           cacheControl: '3600',
+          contentType: file.type || 'image/jpeg',
           upsert: false,
         });
 
@@ -254,7 +259,7 @@ export default function EventPhotoGalleryPage() {
 
   return (
     <div className="min-h-screen bg-[#F0EFEB] flex justify-center selection:bg-zinc-200">
-      {/* メインコンテナ */}
+      {/* メインコンテナ（横幅100%フィット） */}
       <main className="w-full max-w-md min-h-screen bg-white relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6rem)] overflow-y-auto overflow-x-hidden">
         {/* (1) 固定すりガラスヘッダー */}
         <header className="sticky top-0 z-40 w-full bg-zinc-100/85 backdrop-blur-md border-b border-zinc-200/80 px-4 py-3 flex items-center justify-between">
@@ -310,19 +315,26 @@ export default function EventPhotoGalleryPage() {
           </button>
         </section>
 
-        {/* (3) 3カラム正方形写真グリッド */}
+        {/* (3) 3カラム正方形写真グリッド（横幅いっぱい・余白ゼロ） */}
         {filteredPhotos.length === 0 ? (
-          /* 写真が0件のときのグリッドプレースホルダー */
-          <div className="w-full px-4 py-8 flex flex-col items-center justify-center text-center">
-            <div className="grid grid-cols-3 gap-2 w-full max-w-xs mb-6 opacity-30">
-              {[...Array(6)].map((_, i) => (
-                <div key={i} className="aspect-square bg-zinc-200 rounded-lg border border-dashed border-zinc-400 flex items-center justify-center">
-                  <ImagePlus className="w-5 h-5 text-zinc-400" />
+          <div className="w-full">
+            <div className="grid grid-cols-3 gap-[1px] bg-zinc-200 w-full">
+              {[...Array(9)].map((_, i) => (
+                <div
+                  key={i}
+                  className="w-full aspect-square bg-zinc-50 flex flex-col items-center justify-center text-zinc-300"
+                >
+                  <ImagePlus className="w-6 h-6 opacity-40 mb-1" strokeWidth={1.5} />
+                  <span className="text-[10px] opacity-40">枠 {i + 1}</span>
                 </div>
               ))}
             </div>
-            <p className="text-sm font-medium text-zinc-500 mb-1">写真がまだありません</p>
-            <p className="text-xs text-zinc-400">右下のカメラボタンから最初の写真を投稿してください！</p>
+            <div className="py-8 text-center px-4">
+              <p className="text-sm font-medium text-zinc-600 mb-1">写真がまだありません</p>
+              <p className="text-xs text-zinc-400">
+                右下のカメラボタンから「撮影」または「アルバム選択」で写真を投稿してください
+              </p>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-[1px] bg-zinc-200 w-full">
@@ -337,6 +349,7 @@ export default function EventPhotoGalleryPage() {
                   onClick={() => setSelectedCellId(isSelected ? null : photo.id)}
                   className="w-full aspect-square relative overflow-hidden bg-zinc-100 cursor-pointer select-none"
                 >
+                  {/* (3-a) 正方形画像 */}
                   <img
                     src={photo.public_url}
                     alt="Wedding memory"
@@ -344,12 +357,12 @@ export default function EventPhotoGalleryPage() {
                     loading="lazy"
                   />
 
-                  {/* 左下いいね数 */}
+                  {/* (3-b) 左下いいね数 */}
                   <span className="absolute bottom-1.5 left-1.5 text-[clamp(0.65rem,2.5vw,0.75rem)] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] z-10 pointer-events-none">
                     {photo.likes_count}
                   </span>
 
-                  {/* 右下ハートトグル */}
+                  {/* (3-c / 3-g) 右下ハートトグル */}
                   <button
                     onClick={(e) => toggleLike(photo.id, e)}
                     className="absolute bottom-1.5 right-1.5 z-20 p-1 active:scale-125 transition"
@@ -364,14 +377,14 @@ export default function EventPhotoGalleryPage() {
                     />
                   </button>
 
-                  {/* 右上保存済みバッジ */}
+                  {/* (3-h) 右上保存済みバッジ */}
                   {isSaved && (
                     <div className="absolute top-1.5 right-1.5 z-10 pointer-events-none">
                       <CheckCircle2 className="w-4 h-4 fill-emerald-500 text-white drop-shadow" />
                     </div>
                   )}
 
-                  {/* タップ時の周辺減光オーバーレイ ＆ 保存アイコン */}
+                  {/* (3-e / 3-f) タップ時の周辺減光オーバーレイ ＆ 保存アイコン */}
                   {isSelected && (
                     <div className="absolute inset-0 bg-black/45 backdrop-blur-[1px] flex flex-col items-center justify-start pt-3 z-10 transition">
                       <button
@@ -390,12 +403,12 @@ export default function EventPhotoGalleryPage() {
         )}
       </main>
 
-      {/* (4) フローティング撮影ボタン (FAB) */}
+      {/* (4) フローティング撮影/選択ボタン (FAB) */}
+      {/* capture属性を削除し、撮影/アルバム選択を両立 */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         onChange={handleFileUpload}
         className="hidden"
       />
