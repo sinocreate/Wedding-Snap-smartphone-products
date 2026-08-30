@@ -126,10 +126,9 @@ export default function EventPhotoGalleryPage() {
   const [isHostMode, setIsHostMode] = useState(false);
   const [pinInput, setPinInput] = useState('');
 
-  const [dragOffset, setDragOffset] = useState(0);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const touchStartX = useRef<number | null>(null);
-  const isDragging = useRef(false);
+  // 高速スワイプ判定用
+  const touchStartX = useRef<number>(0);
+  const touchStartTime = useRef<number>(0);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const albumInputRef = useRef<HTMLInputElement>(null);
@@ -519,59 +518,45 @@ export default function EventPhotoGalleryPage() {
   };
 
   const currentPhoto = previewIndex !== null ? filteredPhotos[previewIndex] : null;
-  const prevPhoto = previewIndex !== null && filteredPhotos.length > 1
-    ? filteredPhotos[(previewIndex - 1 + filteredPhotos.length) % filteredPhotos.length]
-    : null;
-  const nextPhoto = previewIndex !== null && filteredPhotos.length > 1
-    ? filteredPhotos[(previewIndex + 1) % filteredPhotos.length]
-    : null;
 
+  const handlePrevPreview = useCallback(() => {
+    if (previewIndex === null) return;
+    setPreviewIndex((prev) => (prev !== null && prev > 0 ? prev - 1 : filteredPhotos.length - 1));
+  }, [previewIndex, filteredPhotos.length]);
+
+  const handleNextPreview = useCallback(() => {
+    if (previewIndex === null) return;
+    setPreviewIndex((prev) => (prev !== null && prev < filteredPhotos.length - 1 ? prev + 1 : 0));
+  }, [previewIndex, filteredPhotos.length]);
+
+  // 高速スワイプ判定（時差・不発ゼロ化）
   const onTouchStart = (e: React.TouchEvent) => {
-    if (isAnimating) return;
     touchStartX.current = e.targetTouches[0].clientX;
-    isDragging.current = true;
+    touchStartTime.current = Date.now();
   };
 
-  const onTouchMove = (e: React.TouchEvent) => {
-    if (!isDragging.current || touchStartX.current === null || isAnimating) return;
-    const currentX = e.targetTouches[0].clientX;
-    const diff = currentX - touchStartX.current;
-    setDragOffset(diff);
-  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const endX = e.changedTouches[0].clientX;
+    const diffX = endX - touchStartX.current;
+    const diffTime = Date.now() - touchStartTime.current;
 
-  const onTouchEnd = () => {
-    if (!isDragging.current || isAnimating) return;
-    isDragging.current = false;
+    // 距離が40px以上、または300ms以内の素早いフリックで即座に切り替え
+    const isFlick = diffTime < 300 && Math.abs(diffX) > 25;
+    const isDrag = Math.abs(diffX) > 45;
 
-    const threshold = 60;
-
-    if (dragOffset < -threshold && nextPhoto) {
-      setIsAnimating(true);
-      setDragOffset(-window.innerWidth);
-      setTimeout(() => {
-        setPreviewIndex((prev) => (prev !== null && prev < filteredPhotos.length - 1 ? prev + 1 : 0));
-        setDragOffset(0);
-        setIsAnimating(false);
-      }, 200);
-    } else if (dragOffset > threshold && prevPhoto) {
-      setIsAnimating(true);
-      setDragOffset(window.innerWidth);
-      setTimeout(() => {
-        setPreviewIndex((prev) => (prev !== null && prev > 0 ? prev - 1 : filteredPhotos.length - 1));
-        setDragOffset(0);
-        setIsAnimating(false);
-      }, 200);
-    } else {
-      setIsAnimating(true);
-      setDragOffset(0);
-      setTimeout(() => setIsAnimating(false), 200);
+    if (isFlick || isDrag) {
+      if (diffX < 0) {
+        handleNextPreview();
+      } else {
+        handlePrevPreview();
+      }
     }
-    touchStartX.current = null;
   };
 
   return (
     <div className="min-h-screen bg-[#F0EFEB] flex justify-center selection:bg-zinc-200">
       <main className="w-full max-w-md min-h-screen bg-white relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6rem)] overflow-y-auto overflow-x-hidden">
+        {/* ホストモード稼働中バナー */}
         {isHostMode && (
           <div className="sticky top-0 z-50 bg-amber-500 text-zinc-950 text-xs font-bold px-4 py-1.5 flex items-center justify-between shadow">
             <span className="flex items-center space-x-1">
@@ -584,6 +569,7 @@ export default function EventPhotoGalleryPage() {
           </div>
         )}
 
+        {/* 固定ヘッダー */}
         <header className="sticky top-0 z-40 w-full bg-zinc-100/90 backdrop-blur-sm border-b border-zinc-200 px-4 py-3 flex items-center justify-between">
           <div className="w-6" />
           <h1 className="font-serif italic text-[clamp(1.1rem,4.5vw,1.25rem)] tracking-wider text-zinc-800 select-none">
@@ -598,10 +584,11 @@ export default function EventPhotoGalleryPage() {
           </button>
         </header>
 
+        {/* 3大円形ナビゲーション */}
         <section className="flex justify-between items-center w-full px-6 py-4">
           <button
             onClick={() => setActiveFilter(activeFilter === 'ranking' ? null : 'ranking')}
-            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow flex flex-col items-center justify-center transition-transform active:scale-95 transform-gpu ${
+            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow flex flex-col items-center justify-center transition-transform active:scale-95 ${
               activeFilter === 'ranking' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105' : ''
             }`}
           >
@@ -613,7 +600,7 @@ export default function EventPhotoGalleryPage() {
 
           <button
             onClick={() => setActiveFilter(activeFilter === 'pickup' ? null : 'pickup')}
-            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow flex flex-col items-center justify-center transition-transform active:scale-95 transform-gpu ${
+            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow flex flex-col items-center justify-center transition-transform active:scale-95 ${
               activeFilter === 'pickup' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105' : ''
             }`}
           >
@@ -625,7 +612,7 @@ export default function EventPhotoGalleryPage() {
 
           <button
             onClick={() => setActiveFilter(activeFilter === 'mine' ? null : 'mine')}
-            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow flex flex-col items-center justify-center transition-transform active:scale-95 transform-gpu ${
+            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow flex flex-col items-center justify-center transition-transform active:scale-95 ${
               activeFilter === 'mine' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105' : ''
             }`}
           >
@@ -636,6 +623,7 @@ export default function EventPhotoGalleryPage() {
           </button>
         </section>
 
+        {/* 3カラム正方形写真グリッド */}
         {filteredPhotos.length === 0 ? (
           <div className="w-full">
             <div className="grid grid-cols-3 gap-[1px] bg-zinc-200 w-full">
@@ -667,7 +655,7 @@ export default function EventPhotoGalleryPage() {
                 <div
                   key={photo.id}
                   onClick={() => setPreviewIndex(index)}
-                  className="w-full aspect-square relative overflow-hidden bg-zinc-100 cursor-pointer select-none active:opacity-90 transform-gpu"
+                  className="w-full aspect-square relative overflow-hidden bg-zinc-100 cursor-pointer select-none active:opacity-90"
                 >
                   <img
                     src={displayUrl}
@@ -718,17 +706,17 @@ export default function EventPhotoGalleryPage() {
         )}
       </main>
 
-      {/* 連続カルーセルスワイププレビューモーダル */}
+      {/* 高速スワイプ対応プレビューモーダル */}
       {currentPhoto && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 animate-in fade-in duration-100 select-none overflow-hidden"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 animate-in fade-in duration-100 select-none"
           onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
         >
           <div className="absolute inset-0" onClick={() => setPreviewIndex(null)} />
 
           <div className="relative w-full max-w-sm max-h-[85vh] flex flex-col items-center justify-between z-10 pointer-events-auto">
+            {/* 上部バー */}
             <div className="w-full flex items-center justify-between pb-2 text-white">
               <div className="flex items-center space-x-2">
                 <span className="text-xs font-mono font-medium text-zinc-400">
@@ -748,57 +736,33 @@ export default function EventPhotoGalleryPage() {
               </button>
             </div>
 
+            {/* 写真本体 */}
             <div className="relative w-full max-h-[60vh] h-[55vh] flex items-center justify-center overflow-hidden">
-              <div
-                className="w-full h-full flex items-center justify-center"
-                style={{
-                  transform: `translateX(${dragOffset}px)`,
-                  transition: isAnimating ? 'transform 0.2s cubic-bezier(0.2, 1, 0.3, 1)' : 'none',
-                }}
+              <button
+                onClick={handlePrevPreview}
+                className="hidden sm:flex absolute left-2 z-20 p-2 rounded-full bg-black/50 text-white"
               >
-                {prevPhoto && (
-                  <div
-                    className="absolute w-full h-full flex items-center justify-center pointer-events-none"
-                    style={{ transform: 'translateX(-100%)' }}
-                  >
-                    <img
-                      src={prevPhoto.thumb_url || prevPhoto.public_url}
-                      alt="Prev"
-                      className="max-h-[55vh] max-w-full object-contain rounded-2xl opacity-70"
-                    />
-                  </div>
-                )}
+                <ChevronLeft className="w-6 h-6" />
+              </button>
 
-                <div className="relative w-full h-full flex items-center justify-center">
-                  <img
-                    src={currentPhoto.thumb_url || currentPhoto.public_url}
-                    alt="Current"
-                    className="max-h-[55vh] max-w-full object-contain rounded-2xl shadow-2xl"
-                  />
-                  {currentPhoto.original_url && (
-                    <img
-                      src={currentPhoto.original_url}
-                      alt="HD"
-                      className="absolute inset-0 m-auto max-h-[55vh] max-w-full object-contain rounded-2xl transition-opacity duration-300"
-                    />
-                  )}
-                </div>
-
-                {nextPhoto && (
-                  <div
-                    className="absolute w-full h-full flex items-center justify-center pointer-events-none"
-                    style={{ transform: 'translateX(100%)' }}
-                  >
-                    <img
-                      src={nextPhoto.thumb_url || nextPhoto.public_url}
-                      alt="Next"
-                      className="max-h-[55vh] max-w-full object-contain rounded-2xl opacity-70"
-                    />
-                  </div>
-                )}
+              <div className="relative w-full h-full flex items-center justify-center">
+                <img
+                  key={currentPhoto.id}
+                  src={currentPhoto.original_url || currentPhoto.thumb_url || currentPhoto.public_url}
+                  alt="Current"
+                  className="max-h-[55vh] max-w-full object-contain rounded-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+                />
               </div>
+
+              <button
+                onClick={handleNextPreview}
+                className="hidden sm:flex absolute right-2 z-20 p-2 rounded-full bg-black/50 text-white"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
             </div>
 
+            {/* 下部アクションバー */}
             <div className="w-full mt-4 bg-zinc-900 rounded-2xl px-5 py-3.5 flex items-center justify-between shadow-2xl border border-white/10">
               <button
                 onClick={() => toggleLike(currentPhoto.id)}
@@ -865,10 +829,11 @@ export default function EventPhotoGalleryPage() {
         className="hidden"
       />
 
+      {/* FAB */}
       <button
         disabled={isUploading}
         onClick={() => setIsActionSheetOpen(true)}
-        className={`fixed bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] right-4 sm:right-[max(1rem,calc(50%-224px+1rem))] z-40 w-14 h-14 rounded-full bg-white shadow-xl flex items-center justify-center border border-zinc-100 active:scale-90 transition-transform transform-gpu ${
+        className={`fixed bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] right-4 sm:right-[max(1rem,calc(50%-224px+1rem))] z-40 w-14 h-14 rounded-full bg-white shadow-xl flex items-center justify-center border border-zinc-100 active:scale-90 transition-transform ${
           isUploading ? 'opacity-70' : ''
         }`}
         aria-label="写真を追加"
@@ -880,6 +845,7 @@ export default function EventPhotoGalleryPage() {
         )}
       </button>
 
+      {/* 写真追加アクションシート */}
       {isActionSheetOpen && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end items-center bg-black/50">
           <div className="absolute inset-0" onClick={() => setIsActionSheetOpen(false)} />
@@ -913,6 +879,7 @@ export default function EventPhotoGalleryPage() {
         </div>
       )}
 
+      {/* 初回お名前入力モーダル */}
       {isNameModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl space-y-4">
@@ -961,6 +928,7 @@ export default function EventPhotoGalleryPage() {
         </div>
       )}
 
+      {/* ドロワーメニュー */}
       {isDrawerOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div
