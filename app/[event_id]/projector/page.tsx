@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Trophy,
@@ -12,8 +12,10 @@ import {
   Minimize2,
   Award,
   Crown,
-  Play,
+  ChevronRight,
+  ChevronLeft,
   X,
+  Sparkle,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -62,9 +64,9 @@ export default function ProjectorLivePage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [guestUrl, setGuestUrl] = useState('');
 
-  // 👑 ランキング発表モード（表彰式・余興演出用）
+  // 👑 ランキング発表モード状態
   const [isCeremonyOpen, setIsCeremonyOpen] = useState(false);
-  const [ceremonyStep, setCeremonyStep] = useState<3 | 2 | 1>(3);
+  const [ceremonyStep, setCeremonyStep] = useState<number>(3); // 3 -> 2 -> 1
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -128,12 +130,12 @@ export default function ProjectorLivePage() {
   }, [photos]);
 
   useEffect(() => {
-    if (slideshowPhotos.length <= 1) return;
+    if (slideshowPhotos.length <= 1 || isCeremonyOpen) return;
     const timer = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % slideshowPhotos.length);
     }, 5500);
     return () => clearInterval(timer);
-  }, [slideshowPhotos.length]);
+  }, [slideshowPhotos.length, isCeremonyOpen]);
 
   const rankingPhotos = useMemo(() => {
     return [...photos].sort((a, b) => b.likes_count - a.likes_count).slice(0, 3);
@@ -153,6 +155,56 @@ export default function ProjectorLivePage() {
     }
   };
 
+  // 紙吹雪（Confetti）発射関数
+  const fireConfetti = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    if (!(window as any).confetti) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js';
+      document.body.appendChild(script);
+      await new Promise((resolve) => { script.onload = resolve; });
+    }
+    const confetti = (window as any).confetti;
+    if (confetti) {
+      confetti({
+        particleCount: 120,
+        spread: 100,
+        origin: { y: 0.6 },
+        colors: ['#fbbf24', '#f59e0b', '#ec4899', '#ffffff'],
+      });
+    }
+  }, []);
+
+  // ステップ切り替え処理
+  const handleSelectStep = (step: number) => {
+    setCeremonyStep(step);
+    if (step === 1) {
+      fireConfetti();
+    }
+  };
+
+  const handleNextStep = () => {
+    if (ceremonyStep === 3) handleSelectStep(2);
+    else if (ceremonyStep === 2) handleSelectStep(1);
+  };
+
+  const handlePrevStep = () => {
+    if (ceremonyStep === 1) handleSelectStep(2);
+    else if (ceremonyStep === 2) handleSelectStep(3);
+  };
+
+  // キーボード操作対応
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isCeremonyOpen) return;
+      if (e.key === 'ArrowLeft') handlePrevStep();
+      if (e.key === 'ArrowRight' || e.key === ' ') handleNextStep();
+      if (e.key === 'Escape') setIsCeremonyOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCeremonyOpen, ceremonyStep]);
+
   const currentSlide = slideshowPhotos[currentIndex] || photos[0];
   const ceremonyTargetPhoto = rankingPhotos[ceremonyStep - 1];
 
@@ -171,16 +223,15 @@ export default function ProjectorLivePage() {
         </div>
 
         <div className="flex items-center space-x-4">
-          {/* 表彰式・余興用ランキング発表ボタン */}
           <button
             onClick={() => {
               setCeremonyStep(3);
               setIsCeremonyOpen(true);
             }}
-            className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-black rounded-xl text-xs flex items-center space-x-2 shadow-lg active:scale-95 transition"
+            className="px-5 py-2.5 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-zinc-950 font-black rounded-xl text-sm flex items-center space-x-2 shadow-xl shadow-amber-500/20 active:scale-95 transition"
           >
             <Trophy className="w-4 h-4" />
-            <span>🏆 ランキング発表モード</span>
+            <span>🏆 表彰式・ランキング発表</span>
           </button>
 
           <span className="text-sm text-zinc-400">
@@ -222,9 +273,8 @@ export default function ProjectorLivePage() {
                     <span>新郎新婦 Pickup</span>
                   </span>
                 )}
-                {/* 投稿者名 */}
                 <span className="text-sm text-zinc-200 font-medium">
-                  📸 <strong>{currentSlide.user_name || 'ゲスト'}</strong>
+                  📸 <strong>{currentSlide.user_name || 'ゲスト'}</strong> 様
                 </span>
                 <div className="flex items-center space-x-1.5 text-pink-400 text-sm font-bold pl-2 border-l border-white/20">
                   <Heart className="w-4 h-4 fill-pink-500" />
@@ -308,7 +358,6 @@ export default function ProjectorLivePage() {
                   >
                     {rank + 1}
                   </div>
-                  {/* 投稿者名 ＆ いいね */}
                   <div className="absolute bottom-1 inset-x-1 bg-black/75 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center justify-between text-zinc-200">
                     <span className="truncate max-w-[60%]">{photo.user_name || 'ゲスト'}</span>
                     <span className="text-pink-400 flex items-center space-x-0.5">
@@ -356,90 +405,132 @@ export default function ProjectorLivePage() {
         </div>
       </div>
 
-      {/* 👑 表彰式・余興用ランキング発表全画面モーダル */}
+      {/* 👑 表彰式・ランキング発表全画面モーダル（完全版） */}
       {isCeremonyOpen && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-between p-8 animate-in fade-in duration-300">
+        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-between p-8 animate-in fade-in duration-300 select-none">
           <div className="w-full flex justify-between items-center">
-            <div className="flex items-center space-x-2 text-amber-400 font-black text-xl tracking-widest uppercase">
-              <Crown className="w-7 h-7" />
+            <div className="flex items-center space-x-3 text-amber-400 font-black text-2xl tracking-widest uppercase">
+              <Crown className="w-8 h-8 animate-bounce" />
               <span>BEST PHOTO AWARDS</span>
             </div>
             <button
               onClick={() => setIsCeremonyOpen(false)}
-              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"
+              className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
+              title="閉じる (Esc)"
             >
               <X className="w-6 h-6" />
             </button>
           </div>
 
-          {/* 発表写真本体 */}
-          <div className="relative flex-1 w-full max-w-4xl flex flex-col items-center justify-center my-4">
+          {/* 写真表示エリア */}
+          <div className="relative flex-1 w-full max-w-4xl flex flex-col items-center justify-center my-2">
             {ceremonyTargetPhoto ? (
-              <div className="relative flex flex-col items-center animate-in zoom-in-75 duration-500">
-                {/* 順位バッジ */}
+              <div key={ceremonyStep} className="relative flex flex-col items-center animate-in zoom-in-90 fade-in duration-300">
+                {/* 順位クラウンバッジ */}
                 <div
-                  className={`text-2xl font-black px-8 py-2 rounded-full mb-4 shadow-2xl flex items-center space-x-2 tracking-widest ${
+                  className={`text-xl md:text-2xl font-black px-8 py-2.5 rounded-full mb-4 shadow-2xl flex items-center space-x-3 tracking-widest ${
                     ceremonyStep === 1
-                      ? 'bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 text-zinc-950 ring-4 ring-amber-300 shadow-amber-500/50'
+                      ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 text-zinc-950 ring-4 ring-amber-300 shadow-amber-500/50'
                       : ceremonyStep === 2
-                      ? 'bg-zinc-300 text-zinc-950'
-                      : 'bg-amber-800 text-amber-100'
+                      ? 'bg-gradient-to-r from-slate-200 to-slate-400 text-zinc-950 ring-2 ring-slate-100'
+                      : 'bg-gradient-to-r from-amber-800 to-amber-900 text-amber-100 ring-2 ring-amber-700'
                   }`}
                 >
-                  <Award className="w-6 h-6" />
-                  <span>{ceremonyStep === 1 ? '第 1 位 （グランプリ）' : `第 ${ceremonyStep} 位`}</span>
+                  <Award className="w-7 h-7" />
+                  <span>
+                    {ceremonyStep === 1 ? '👑 堂々の第 1 位 （グランプリ）' : `✨ 第 ${ceremonyStep} 位`}
+                  </span>
                 </div>
 
-                {/* 写真 */}
-                <div className="max-h-[50vh] rounded-3xl overflow-hidden border-4 border-amber-400/80 shadow-2xl bg-black">
+                {/* 受賞写真 */}
+                <div className={`max-h-[48vh] rounded-3xl overflow-hidden shadow-2xl bg-black border-4 ${
+                  ceremonyStep === 1 ? 'border-amber-400 shadow-amber-500/30' : 'border-zinc-700'
+                }`}>
                   <img
                     src={ceremonyTargetPhoto.original_url || ceremonyTargetPhoto.public_url}
                     alt="Award winner"
-                    className="max-h-[50vh] w-auto object-contain"
+                    className="max-h-[48vh] w-auto object-contain"
                   />
                 </div>
 
-                {/* 投稿者名 ＆ 獲得いいね */}
+                {/* 撮影者名 ＆ いいね数 */}
                 <div className="mt-4 text-center space-y-1">
-                  <h3 className="text-3xl font-black text-white tracking-wider">
-                    撮影者: <span className="text-amber-400 underline">{ceremonyTargetPhoto.user_name || 'ゲスト'}</span> 様
+                  <h3 className="text-3xl md:text-4xl font-black text-white tracking-wide">
+                    撮影者: <span className="text-amber-400 underline decoration-amber-500 underline-offset-8">{ceremonyTargetPhoto.user_name || 'ゲスト'}</span> 様
                   </h3>
-                  <p className="text-pink-400 font-bold text-lg">
-                    獲得いいね: {ceremonyTargetPhoto.likes_count} 票
+                  <p className="text-pink-400 font-bold text-lg pt-1">
+                    獲得数: {ceremonyTargetPhoto.likes_count} いいね！
                   </p>
                 </div>
               </div>
             ) : (
-              <div className="text-zinc-500 text-xl font-bold">まだ該当順位の写真がありません</div>
+              <div className="text-center text-zinc-500 space-y-2">
+                <Trophy className="w-16 h-16 mx-auto opacity-30" />
+                <p className="text-xl font-bold">第 {ceremonyStep} 位の写真がまだありません</p>
+                <p className="text-sm text-zinc-600">写真にいいねを集めて順位を決定しましょう！</p>
+              </div>
             )}
           </div>
 
-          {/* 下部コントローラー */}
-          <div className="flex items-center space-x-4 bg-zinc-900 px-6 py-3 rounded-2xl border border-zinc-800">
+          {/* 下部ナビゲーションコントローラー */}
+          <div className="flex items-center space-x-4 bg-zinc-900/90 border border-zinc-800 px-6 py-3.5 rounded-3xl shadow-2xl">
+            {/* 前の順位へ */}
             <button
-              onClick={() => setCeremonyStep(3)}
-              className={`px-5 py-2.5 rounded-xl font-bold text-sm transition ${
-                ceremonyStep === 3 ? 'bg-amber-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+              disabled={ceremonyStep === 3}
+              onClick={handlePrevStep}
+              className={`p-3 rounded-2xl flex items-center space-x-1 transition ${
+                ceremonyStep === 3 ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-300 hover:bg-zinc-800 active:scale-95'
               }`}
+              title="前の順位 (←)"
             >
-              第3位を発表
+              <ChevronLeft className="w-5 h-5" />
             </button>
-            <button
-              onClick={() => setCeremonyStep(2)}
-              className={`px-5 py-2.5 rounded-xl font-bold text-sm transition ${
-                ceremonyStep === 2 ? 'bg-zinc-200 text-zinc-950' : 'bg-zinc-800 text-zinc-400 hover:text-white'
-              }`}
-            >
-              第2位を発表
-            </button>
-            <button
-              onClick={() => setCeremonyStep(1)}
-              className={`px-6 py-2.5 rounded-xl font-black text-base shadow-lg transition ${
-                ceremonyStep === 1 ? 'bg-amber-400 text-zinc-950 ring-2 ring-amber-300' : 'bg-zinc-800 text-amber-400 hover:bg-zinc-700'
-              }`}
-            >
-              👑 堂々の第1位を発表！
-            </button>
+
+            {/* 順位選択ボタン群 */}
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => handleSelectStep(3)}
+                className={`px-5 py-2.5 rounded-2xl font-bold text-sm transition ${
+                  ceremonyStep === 3
+                    ? 'bg-amber-800 text-white shadow-lg'
+                    : 'bg-zinc-800/80 text-zinc-400 hover:text-white'
+                }`}
+              >
+                第3位
+              </button>
+
+              <button
+                onClick={() => handleSelectStep(2)}
+                className={`px-5 py-2.5 rounded-2xl font-bold text-sm transition ${
+                  ceremonyStep === 2
+                    ? 'bg-slate-200 text-zinc-950 font-black shadow-lg'
+                    : 'bg-zinc-800/80 text-zinc-400 hover:text-white'
+                }`}
+              >
+                第2位
+              </button>
+
+              <button
+                onClick={() => handleSelectStep(1)}
+                className={`px-6 py-2.5 rounded-2xl font-black text-sm transition ${
+                  ceremonyStep === 1
+                    ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-zinc-950 shadow-lg shadow-amber-500/30 ring-2 ring-amber-300'
+                    : 'bg-zinc-800/80 text-amber-400 hover:bg-zinc-700'
+                }`}
+              >
+                👑 第1位
+              </button>
+            </div>
+
+            {/* 次の順位へ進むメインボタン */}
+            {ceremonyStep > 1 && (
+              <button
+                onClick={handleNextStep}
+                className="ml-4 px-6 py-2.5 bg-white hover:bg-zinc-200 active:scale-95 text-zinc-950 font-black text-sm rounded-2xl flex items-center space-x-1.5 shadow-xl transition"
+              >
+                <span>{ceremonyStep === 3 ? '第2位を発表 ➔' : '👑 第1位を発表 ➔'}</span>
+              </button>
+            )}
           </div>
         </div>
       )}
