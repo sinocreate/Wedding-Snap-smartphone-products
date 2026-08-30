@@ -13,7 +13,7 @@ import {
   Sparkles,
   User,
   ImagePlus,
-  ImageIcon,
+  Image as ImageIcon,
   Loader2,
   Trash2,
   Star,
@@ -160,7 +160,7 @@ export default function EventPhotoGalleryPage() {
     loadUserLikes();
   }, [eventId]);
 
-  // 2. 写真一覧取得 ＆ 確実なRealtime同期
+  // 2. 写真一覧取得 ＆ Realtime同期
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
@@ -187,7 +187,6 @@ export default function EventPhotoGalleryPage() {
     };
     fetchPhotos();
 
-    // フィルタをJS側で行うことで確実なRealtime受信を実現
     const channel = supabase
       .channel(`wedding_realtime_${eventId}_${Date.now()}`)
       .on(
@@ -237,7 +236,7 @@ export default function EventPhotoGalleryPage() {
     return result;
   }, [photos, activeFilter, userId]);
 
-  // 4. いいねトグル（DB完全永続化）
+  // 4. いいねトグル
   const toggleLike = async (photoId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const isLiked = myLikedPhotoIds.includes(photoId);
@@ -251,7 +250,6 @@ export default function EventPhotoGalleryPage() {
       ? myLikedPhotoIds.filter((id) => id !== photoId)
       : [...myLikedPhotoIds, photoId];
 
-    // Optimistic UI 更新
     setMyLikedPhotoIds(nextLikes);
     localStorage.setItem(`likes_${eventId}`, JSON.stringify(nextLikes));
 
@@ -275,8 +273,6 @@ export default function EventPhotoGalleryPage() {
       });
 
       if (error) {
-        console.error('RPC Error, falling back to direct query:', error);
-        // フォールバック: 直接更新
         if (isLiked) {
           await supabase.from('photo_likes').delete().eq('photo_id', photoId).eq('user_id', userId);
         } else {
@@ -430,7 +426,7 @@ export default function EventPhotoGalleryPage() {
       setIsZipping(true);
       setZipProgress(0);
 
-      if (!(window as any).JSZip) {
+      if (typeof window !== 'undefined' && !(window as any).JSZip) {
         const script = document.createElement('script');
         script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
         document.body.appendChild(script);
@@ -492,7 +488,6 @@ export default function EventPhotoGalleryPage() {
     setIsDrawerOpen(false);
   };
 
-  // スワイプナビゲーション（GPU最適化）
   const currentPreviewPhoto = previewIndex !== null ? filteredPhotos[previewIndex] : null;
 
   const handlePrevPreview = useCallback(() => {
@@ -525,7 +520,6 @@ export default function EventPhotoGalleryPage() {
   return (
     <div className="min-h-screen bg-[#F0EFEB] flex justify-center selection:bg-zinc-200">
       <main className="w-full max-w-md min-h-screen bg-white relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6rem)] overflow-y-auto overflow-x-hidden">
-        {/* ホストモード稼働中バナー */}
         {isHostMode && (
           <div className="sticky top-0 z-50 bg-amber-500 text-zinc-950 text-xs font-bold px-4 py-1.5 flex items-center justify-between shadow">
             <span className="flex items-center space-x-1">
@@ -538,7 +532,6 @@ export default function EventPhotoGalleryPage() {
           </div>
         )}
 
-        {/* (1) 固定ヘッダー */}
         <header className="sticky top-0 z-40 w-full bg-zinc-100/90 backdrop-blur-sm border-b border-zinc-200 px-4 py-3 flex items-center justify-between">
           <div className="w-6" />
           <h1 className="font-serif italic text-[clamp(1.1rem,4.5vw,1.25rem)] tracking-wider text-zinc-800 select-none">
@@ -553,7 +546,6 @@ export default function EventPhotoGalleryPage() {
           </button>
         </header>
 
-        {/* (2) 3大円形ナビゲーション */}
         <section className="flex justify-between items-center w-full px-6 py-4">
           <button
             onClick={() => setActiveFilter(activeFilter === 'ranking' ? null : 'ranking')}
@@ -585,4 +577,11 @@ export default function EventPhotoGalleryPage() {
               activeFilter === 'mine' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105' : ''
             }`}
           >
-            <User className="w-5 h-5 tex
+            <User className="w-5 h-5 text-emerald-500 mb-1" strokeWidth={1.5} />
+            <span className="text-[clamp(0.7rem,2.8vw,0.85rem)] font-medium text-zinc-700">
+              mine
+            </span>
+          </button>
+        </section>
+
+        {filteredPhotos.length =
