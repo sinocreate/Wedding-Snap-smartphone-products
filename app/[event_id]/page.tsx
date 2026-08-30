@@ -123,7 +123,6 @@ export default function EventPhotoGalleryPage() {
   const [isZipping, setIsZipping] = useState(false);
   const [zipProgress, setZipProgress] = useState(0);
 
-  // マイクロアニメーション用ステート
   const [bouncingLikeId, setBouncingLikeId] = useState<string | null>(null);
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -139,7 +138,6 @@ export default function EventPhotoGalleryPage() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const albumInputRef = useRef<HTMLInputElement>(null);
 
-  // データ同期
   const fetchAllData = useCallback(async (currentUid: string) => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
@@ -195,7 +193,6 @@ export default function EventPhotoGalleryPage() {
     fetchAllData(localUserId);
   }, [eventId, fetchAllData]);
 
-  // Realtime購読（負荷ゼロの差分検知）
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
@@ -255,7 +252,6 @@ export default function EventPhotoGalleryPage() {
     return result;
   }, [photos, activeFilter, userId, isHostMode]);
 
-  // いいねトグル（ロック判定・弾けるアニメーション付き）
   const toggleLike = async (photoId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
 
@@ -271,7 +267,6 @@ export default function EventPhotoGalleryPage() {
       return;
     }
 
-    // アニメーション発火
     setBouncingLikeId(photoId);
     setTimeout(() => setBouncingLikeId(null), 300);
 
@@ -337,14 +332,11 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // セキュリティ＆進捗付きアップロード処理
   const executeUpload = async (file: File, nameToUse: string) => {
-    // 1. 拡張子/MIMEタイプチェック
     if (!file.type.startsWith('image/')) {
       alert('画像ファイル（JPEG / PNG / WEBP / HEIC 等）のみアップロード可能です');
       return;
     }
-    // 2. サイズ上限チェック（15MB）
     if (file.size > 15 * 1024 * 1024) {
       alert('写真のサイズが大きすぎます（15MB以下にしてください）');
       return;
@@ -397,7 +389,6 @@ export default function EventPhotoGalleryPage() {
       setIsUploading(false);
       setUploadProgressText('');
 
-      // バックグラウンドでHD送信
       (async () => {
         try {
           const { data: hdData, error: hdError } = await supabase.storage
@@ -454,7 +445,6 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // ホスト機能
   const handleToggleLock = async () => {
     const nextLocked = !eventData.is_locked;
     setEventData((prev) => ({ ...prev, is_locked: nextLocked }));
@@ -535,7 +525,6 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 卓上案内カード画像の自動生成・保存
   const handleGenerateQrCard = () => {
     if (typeof window === 'undefined') return;
     const canvas = document.createElement('canvas');
@@ -544,16 +533,13 @@ export default function EventPhotoGalleryPage() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // 背景
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 金色の外枠
     ctx.strokeStyle = '#D4AF37';
     ctx.lineWidth = 12;
     ctx.strokeRect(60, 60, canvas.width - 120, canvas.height - 120);
 
-    // タイトル
     ctx.fillStyle = '#18181B';
     ctx.font = 'italic 72px "Times New Roman", serif';
     ctx.textAlign = 'center';
@@ -568,7 +554,6 @@ export default function EventPhotoGalleryPage() {
     ctx.fillText('本日はご列席いただき誠にありがとうございます', 600, 460);
     ctx.fillText('皆さまが撮影した素敵な写真をぜひ共有してください', 600, 520);
 
-    // QRコード描画
     const qrImg = new Image();
     qrImg.crossOrigin = 'anonymous';
     qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(window.location.href)}`;
@@ -640,16 +625,16 @@ export default function EventPhotoGalleryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F0EFEB] flex justify-center selection:bg-zinc-200 font-sans">
-      <main className="w-full max-w-md min-h-screen bg-white relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6rem)] overflow-y-auto overflow-x-hidden">
+    <div className="min-h-screen bg-[#F7F5F0] flex justify-center selection:bg-amber-100 font-sans antialiased text-zinc-800">
+      <main className="w-full max-w-md min-h-screen bg-[#FDFCFB] relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6.5rem)] overflow-y-auto overflow-x-hidden border-x border-black/[0.04]">
         {/* ホストモード稼働中バナー */}
         {isHostMode && (
-          <div className="sticky top-0 z-50 bg-amber-500 text-zinc-950 text-xs font-bold px-4 py-1.5 flex items-center justify-between shadow">
-            <span className="flex items-center space-x-1">
+          <div className="sticky top-0 z-50 bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 text-xs font-bold px-4 py-1.5 flex items-center justify-between shadow-md">
+            <span className="flex items-center space-x-1.5">
               <Unlock className="w-3.5 h-3.5" />
               <span>ホスト管理者モード中</span>
             </span>
-            <button onClick={handleLogoutHost} className="underline text-[11px]">
+            <button onClick={handleLogoutHost} className="underline text-[11px] font-bold">
               終了
             </button>
           </div>
@@ -657,89 +642,95 @@ export default function EventPhotoGalleryPage() {
 
         {/* 投票締め切り告知バナー */}
         {eventData.is_locked && (
-          <div className="bg-zinc-900 text-amber-400 text-xs font-bold px-4 py-2 flex items-center justify-center space-x-1.5 text-center shadow">
+          <div className="bg-zinc-900 text-amber-300 text-xs font-bold px-4 py-2 flex items-center justify-center space-x-1.5 text-center shadow-md">
             <AlertCircle className="w-3.5 h-3.5" />
             <span>いいね投票は締め切られました（閲覧・保存は可能です）</span>
           </div>
         )}
 
-        {/* 固定ヘッダー */}
-        <header className="sticky top-0 z-40 w-full bg-zinc-100/90 backdrop-blur-sm border-b border-zinc-200 px-4 py-3 flex items-center justify-between">
+        {/* エレガント固定ヘッダー */}
+        <header className="sticky top-0 z-40 w-full bg-[#FDFCFB]/90 backdrop-blur-md border-b border-black/[0.05] px-5 py-3.5 flex items-center justify-between shadow-[0_1px_8px_rgba(0,0,0,0.02)]">
           <div className="w-6" />
-          <h1 className="font-serif italic text-[clamp(1.15rem,4.5vw,1.35rem)] tracking-wider text-zinc-800 select-none">
+          <h1 className="font-serif italic text-[clamp(1.2rem,4.8vw,1.45rem)] tracking-wider text-zinc-900 select-none font-medium text-center">
             {eventData.title}
           </h1>
           <button
             onClick={() => setIsDrawerOpen(true)}
-            className="text-zinc-700 hover:text-zinc-950 p-1 active:scale-95 transition"
+            className="text-zinc-700 hover:text-zinc-950 p-1.5 rounded-full hover:bg-black/5 active:scale-90 transition"
             aria-label="メニューを開く"
           >
             <Menu className="w-6 h-6" strokeWidth={1.5} />
           </button>
         </header>
 
-        {/* 3大円形ナビゲーション */}
+        {/* 3大円形ナビゲーション（ラグジュアリーカード） */}
         <section className="flex justify-between items-center w-full px-6 py-4">
           <button
             onClick={() => setActiveFilter(activeFilter === 'ranking' ? null : 'ranking')}
-            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow-sm flex flex-col items-center justify-center transition-all active:scale-95 border border-zinc-100 ${
-              activeFilter === 'ranking' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105 shadow-md' : ''
+            className={`w-[27%] max-w-[94px] aspect-square rounded-2xl bg-white flex flex-col items-center justify-center transition-all duration-200 active:scale-95 border ${
+              activeFilter === 'ranking'
+                ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-md bg-amber-50/30'
+                : 'border-black/[0.06] shadow-sm hover:shadow'
             }`}
           >
-            <Trophy className="w-5 h-5 text-amber-500 mb-1" strokeWidth={1.5} />
-            <span className="text-[clamp(0.7rem,2.8vw,0.85rem)] font-medium text-zinc-700">
+            <Trophy className="w-5 h-5 text-amber-500 mb-1" strokeWidth={1.7} />
+            <span className="text-[clamp(0.72rem,2.9vw,0.85rem)] font-bold text-zinc-700 tracking-tight">
               Ranking
             </span>
           </button>
 
           <button
             onClick={() => setActiveFilter(activeFilter === 'pickup' ? null : 'pickup')}
-            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow-sm flex flex-col items-center justify-center transition-all active:scale-95 border border-zinc-100 ${
-              activeFilter === 'pickup' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105 shadow-md' : ''
+            className={`w-[27%] max-w-[94px] aspect-square rounded-2xl bg-white flex flex-col items-center justify-center transition-all duration-200 active:scale-95 border ${
+              activeFilter === 'pickup'
+                ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md bg-indigo-50/30'
+                : 'border-black/[0.06] shadow-sm hover:shadow'
             }`}
           >
-            <Sparkles className="w-5 h-5 text-indigo-500 mb-1" strokeWidth={1.5} />
-            <span className="text-[clamp(0.7rem,2.8vw,0.85rem)] font-medium text-zinc-700">
+            <Sparkles className="w-5 h-5 text-indigo-500 mb-1" strokeWidth={1.7} />
+            <span className="text-[clamp(0.72rem,2.9vw,0.85rem)] font-bold text-zinc-700 tracking-tight">
               Pickup
             </span>
           </button>
 
           <button
             onClick={() => setActiveFilter(activeFilter === 'mine' ? null : 'mine')}
-            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow-sm flex flex-col items-center justify-center transition-all active:scale-95 border border-zinc-100 ${
-              activeFilter === 'mine' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105 shadow-md' : ''
+            className={`w-[27%] max-w-[94px] aspect-square rounded-2xl bg-white flex flex-col items-center justify-center transition-all duration-200 active:scale-95 border ${
+              activeFilter === 'mine'
+                ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-md bg-emerald-50/30'
+                : 'border-black/[0.06] shadow-sm hover:shadow'
             }`}
           >
-            <User className="w-5 h-5 text-emerald-500 mb-1" strokeWidth={1.5} />
-            <span className="text-[clamp(0.7rem,2.8vw,0.85rem)] font-medium text-zinc-700">
+            <User className="w-5 h-5 text-emerald-500 mb-1" strokeWidth={1.7} />
+            <span className="text-[clamp(0.72rem,2.9vw,0.85rem)] font-bold text-zinc-700 tracking-tight">
               mine
             </span>
           </button>
         </section>
 
-        {/* 3カラム写真グリッド */}
+        {/* 洗練されたフォトギャラリー（カード型グリッド） */}
         {filteredPhotos.length === 0 ? (
-          <div className="w-full">
-            <div className="grid grid-cols-3 gap-[1px] bg-zinc-200 w-full">
+          <div className="w-full px-3">
+            <div className="grid grid-cols-3 gap-2.5 w-full">
               {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
                 <div
                   key={i}
-                  className="w-full aspect-square bg-zinc-50 flex flex-col items-center justify-center text-zinc-300"
+                  className="w-full aspect-square rounded-2xl bg-black/[0.02] border border-dashed border-black/[0.08] flex flex-col items-center justify-center text-zinc-300"
                 >
                   <Camera className="w-6 h-6 opacity-30 mb-1" strokeWidth={1.5} />
-                  <span className="text-[10px] opacity-40">枠 {i + 1}</span>
+                  <span className="text-[10px] opacity-40 font-mono">#{i + 1}</span>
                 </div>
               ))}
             </div>
-            <div className="py-12 text-center px-4">
+            <div className="py-14 text-center px-4">
               <p className="text-sm font-bold text-zinc-700 mb-1">写真がまだありません</p>
               <p className="text-xs text-zinc-400">
-                右下のカメラボタンから最初の想い出をシェアしてください
+                右下の「投稿する」ボタンから最初の想い出をシェアしてください
               </p>
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-[1px] bg-zinc-200 w-full">
+          <div className="grid grid-cols-3 gap-2 px-3 py-1 w-full">
             {filteredPhotos.map((photo, index) => {
               const isLiked = myLikedPhotoIds.includes(photo.id);
               const isSaved = savedPhotoIds.includes(photo.id);
@@ -750,7 +741,7 @@ export default function EventPhotoGalleryPage() {
                 <div
                   key={photo.id}
                   onClick={() => setPreviewIndex(index)}
-                  className="w-full aspect-square relative overflow-hidden bg-zinc-100 cursor-pointer select-none active:opacity-90"
+                  className="w-full aspect-square relative rounded-2xl overflow-hidden bg-zinc-100 cursor-pointer select-none active:scale-[0.97] transition-all duration-200 shadow-sm hover:shadow border border-black/[0.04]"
                 >
                   <img
                     src={displayUrl}
@@ -759,53 +750,55 @@ export default function EventPhotoGalleryPage() {
                     loading="lazy"
                   />
 
-                  {/* 左下いいね数 */}
-                  <span className="absolute bottom-1.5 left-1.5 text-[clamp(0.65rem,2.5vw,0.75rem)] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] z-10 pointer-events-none">
-                    {photo.likes_count}
-                  </span>
+                  {/* 左下いいね数（極細フロストガラスバッジ） */}
+                  <div className="absolute bottom-1.5 left-1.5 bg-black/40 backdrop-blur-md px-1.5 py-0.5 rounded-full flex items-center space-x-1 z-10 pointer-events-none">
+                    <span className="text-[10px] font-bold text-white">
+                      {photo.likes_count}
+                    </span>
+                  </div>
 
                   {/* Pickupバッジ */}
                   {photo.is_pickup && (
-                    <div className="absolute top-1.5 left-1.5 z-10 pointer-events-none">
-                      <Star className="w-4 h-4 fill-amber-400 text-amber-400 drop-shadow" />
+                    <div className="absolute top-1.5 left-1.5 z-10 pointer-events-none drop-shadow-md">
+                      <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
                     </div>
                   )}
 
-                  {/* 非表示（モデレーション中）バッジ */}
+                  {/* 非表示中バッジ */}
                   {photo.is_hidden && (
-                    <div className="absolute top-1.5 left-1.5 z-10 bg-red-600/90 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                    <div className="absolute top-1.5 left-1.5 z-10 bg-red-600/90 backdrop-blur-sm text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow">
                       非表示中
                     </div>
                   )}
 
                   {/* ホストモード時：投稿者名バッジ */}
                   {isHostMode && photo.user_name && !photo.is_hidden && (
-                    <div className="absolute top-1.5 left-1.5 z-10 bg-black/75 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-amber-300 font-bold max-w-[80%] truncate">
+                    <div className="absolute top-1.5 left-1.5 z-10 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded-md text-[9px] text-amber-300 font-bold max-w-[80%] truncate shadow-sm">
                       {photo.user_name}
                     </div>
                   )}
 
-                  {/* 右下ハートトグル（弾けるアニメーション付き） */}
+                  {/* 右下ハートトグル（弾けるアニメーション） */}
                   <button
                     onClick={(e) => toggleLike(photo.id, e)}
-                    className={`absolute bottom-1.5 right-1.5 z-20 p-1 transition-transform duration-200 ${
-                      isBouncing ? 'scale-150' : 'active:scale-125'
+                    className={`absolute bottom-1.5 right-1.5 z-20 p-1.5 rounded-full bg-black/30 backdrop-blur-md transition-transform duration-200 ${
+                      isBouncing ? 'scale-135' : 'active:scale-125'
                     }`}
                     aria-label="いいね"
                   >
                     <Heart
-                      className={`w-4 h-4 ${
+                      className={`w-3.5 h-3.5 ${
                         isLiked
-                          ? 'fill-pink-500 text-pink-500'
-                          : 'text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]'
+                          ? 'fill-rose-500 text-rose-500'
+                          : 'text-white'
                       }`}
                     />
                   </button>
 
                   {/* 右上保存済みバッジ */}
                   {isSaved && (
-                    <div className="absolute top-1.5 right-1.5 z-10 pointer-events-none">
-                      <CheckCircle2 className="w-4 h-4 fill-emerald-500 text-white drop-shadow" />
+                    <div className="absolute top-1.5 right-1.5 z-10 pointer-events-none drop-shadow">
+                      <CheckCircle2 className="w-4 h-4 fill-emerald-500 text-white" />
                     </div>
                   )}
                 </div>
@@ -822,24 +815,24 @@ export default function EventPhotoGalleryPage() {
           onTouchStart={onTouchStart}
           onTouchEnd={onTouchEnd}
         >
-          {/* 上部オーバーレイバー（半透明フロストグラデーション） */}
+          {/* 上部オーバーレイバー（極薄フロストガラス） */}
           <div className="w-full z-20 bg-gradient-to-b from-black/80 via-black/40 to-transparent p-4 flex items-center justify-between text-white">
             <div className="flex items-center space-x-2">
-              <span className="text-xs font-mono font-bold text-zinc-300 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm">
+              <span className="text-xs font-mono font-bold text-zinc-300 bg-white/10 px-3 py-1 rounded-full backdrop-blur-md border border-white/10">
                 {previewIndex! + 1} / {filteredPhotos.length}
               </span>
               {isHostMode && (
-                <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded-full font-bold backdrop-blur-sm">
+                <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-1 rounded-full font-bold backdrop-blur-md">
                   撮影者: {currentPhoto.user_name || 'ゲスト'} 様
                 </span>
               )}
             </div>
             <button
               onClick={() => setPreviewIndex(null)}
-              className="p-2 rounded-full bg-white/20 hover:bg-white/30 text-white active:scale-90 transition backdrop-blur-sm"
+              className="p-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white active:scale-90 transition backdrop-blur-md border border-white/10"
               aria-label="閉じる"
             >
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5" />
             </button>
           </div>
 
@@ -847,62 +840,59 @@ export default function EventPhotoGalleryPage() {
           <div className="relative flex-1 w-full h-full flex items-center justify-center overflow-hidden">
             <button
               onClick={handlePrevPreview}
-              className="hidden sm:flex absolute left-4 z-20 p-3 rounded-full bg-black/40 text-white hover:bg-black/60 transition"
+              className="hidden sm:flex absolute left-4 z-20 p-3.5 rounded-full bg-black/40 text-white hover:bg-black/60 transition backdrop-blur-md border border-white/10"
             >
-              <ChevronLeft className="w-7 h-7" />
+              <ChevronLeft className="w-6 h-6" />
             </button>
 
             <img
               key={currentPhoto.id}
               src={currentPhoto.original_url || currentPhoto.thumb_url || currentPhoto.public_url}
               alt="Full view"
-              className="w-full h-full object-contain select-none"
+              className="w-full h-full object-contain select-none animate-in zoom-in-95 duration-150"
             />
 
             <button
               onClick={handleNextPreview}
-              className="hidden sm:flex absolute right-4 z-20 p-3 rounded-full bg-black/40 text-white hover:bg-black/60 transition"
+              className="hidden sm:flex absolute right-4 z-20 p-3.5 rounded-full bg-black/40 text-white hover:bg-black/60 transition backdrop-blur-md border border-white/10"
             >
-              <ChevronRight className="w-7 h-7" />
+              <ChevronRight className="w-6 h-6" />
             </button>
           </div>
 
           {/* 下部オーバーレイ操作バー（薄い半透明フロストグラス） */}
-          <div className="w-full z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] flex items-center justify-between text-white">
-            {/* いいねボタン */}
+          <div className="w-full z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5 pb-[calc(env(safe-area-inset-bottom)+1.8rem)] flex items-center justify-between text-white">
             <button
               onClick={() => toggleLike(currentPhoto.id)}
-              className={`flex items-center space-x-2 bg-white/15 backdrop-blur-md px-4 py-2.5 rounded-2xl transition ${
+              className={`flex items-center space-x-2 bg-white/15 hover:bg-white/25 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/10 transition ${
                 bouncingLikeId === currentPhoto.id ? 'scale-110' : 'active:scale-95'
               }`}
             >
               <Heart
-                className={`w-6 h-6 ${
+                className={`w-5 h-5 ${
                   myLikedPhotoIds.includes(currentPhoto.id)
-                    ? 'fill-pink-500 text-pink-500'
+                    ? 'fill-rose-500 text-rose-500'
                     : 'text-zinc-200'
                 }`}
               />
               <span className="font-bold text-sm text-white">{currentPhoto.likes_count}</span>
             </button>
 
-            {/* 端末保存ボタン */}
             <button
               onClick={() => handleDownload(currentPhoto)}
-              className="flex items-center space-x-1.5 px-5 py-2.5 bg-white/20 hover:bg-white/30 active:scale-95 backdrop-blur-md text-white rounded-2xl text-xs font-bold transition"
+              className="flex items-center space-x-1.5 px-5 py-2.5 bg-white/20 hover:bg-white/30 active:scale-95 backdrop-blur-md text-white rounded-2xl text-xs font-bold transition border border-white/10"
             >
               <Download className="w-4 h-4" />
               <span>{savedPhotoIds.includes(currentPhoto.id) ? '保存済み' : '高画質保存'}</span>
             </button>
 
-            {/* ホスト専用モデレーション操作 */}
             {isHostMode && (
               <div className="flex items-center space-x-2 pl-2 border-l border-white/20">
                 <button
                   onClick={() => handleTogglePickup(currentPhoto)}
-                  className={`p-2.5 rounded-2xl backdrop-blur-md transition ${
+                  className={`p-2.5 rounded-2xl backdrop-blur-md border border-white/10 transition ${
                     currentPhoto.is_pickup
-                      ? 'bg-amber-400 text-zinc-950 font-bold'
+                      ? 'bg-amber-400 text-zinc-950 font-bold border-amber-300'
                       : 'bg-white/15 text-white'
                   }`}
                   title="Pickup"
@@ -912,7 +902,7 @@ export default function EventPhotoGalleryPage() {
 
                 <button
                   onClick={() => handleToggleHide(currentPhoto)}
-                  className={`p-2.5 rounded-2xl backdrop-blur-md transition ${
+                  className={`p-2.5 rounded-2xl backdrop-blur-md border border-white/10 transition ${
                     currentPhoto.is_hidden
                       ? 'bg-red-500 text-white'
                       : 'bg-white/15 text-white'
@@ -924,7 +914,7 @@ export default function EventPhotoGalleryPage() {
 
                 <button
                   onClick={() => handleDeletePhoto(currentPhoto)}
-                  className="p-2.5 rounded-2xl bg-red-600/80 backdrop-blur-md text-white active:scale-95 transition"
+                  className="p-2.5 rounded-2xl bg-red-600/80 backdrop-blur-md text-white active:scale-95 transition border border-red-500/50"
                   title="削除"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -952,11 +942,11 @@ export default function EventPhotoGalleryPage() {
         className="hidden"
       />
 
-      {/* FAB（写真追加） */}
+      {/* エレガントFAB（写真追加ボタン） */}
       <button
         disabled={isUploading}
         onClick={() => setIsActionSheetOpen(true)}
-        className={`fixed bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] right-4 sm:right-[max(1rem,calc(50%-224px+1rem))] z-40 h-14 px-5 rounded-full bg-zinc-900 text-white shadow-2xl flex items-center justify-center space-x-2 border border-zinc-700 active:scale-95 transition-transform ${
+        className={`fixed bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] right-4 sm:right-[max(1rem,calc(50%-224px+1rem))] z-40 h-14 px-6 rounded-full bg-zinc-900 text-white shadow-[0_8px_25px_rgba(0,0,0,0.25)] flex items-center justify-center space-x-2 border border-zinc-700/80 active:scale-95 transition-all ${
           isUploading ? 'opacity-90' : ''
         }`}
         aria-label="写真を追加"
@@ -964,12 +954,12 @@ export default function EventPhotoGalleryPage() {
         {isUploading ? (
           <>
             <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
-            <span className="text-xs font-bold">{uploadProgressText}</span>
+            <span className="text-xs font-bold tracking-wide">{uploadProgressText}</span>
           </>
         ) : (
           <>
-            <Camera className="w-6 h-6 text-amber-400" strokeWidth={1.8} />
-            <span className="text-xs font-bold tracking-wide">投稿する</span>
+            <Camera className="w-5 h-5 text-amber-400" strokeWidth={1.8} />
+            <span className="text-xs font-bold tracking-wider">投稿する</span>
           </>
         )}
       </button>
@@ -978,29 +968,29 @@ export default function EventPhotoGalleryPage() {
       {isActionSheetOpen && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end items-center bg-black/50 backdrop-blur-[2px]">
           <div className="absolute inset-0" onClick={() => setIsActionSheetOpen(false)} />
-          <div className="relative w-full max-w-md bg-white rounded-t-3xl p-6 shadow-2xl z-10 space-y-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] animate-in slide-in-from-bottom duration-150">
-            <div className="w-10 h-1 bg-zinc-300 rounded-full mx-auto mb-2" />
-            <h3 className="text-center font-bold text-zinc-800 text-sm mb-4">想い出をシェアする</h3>
+          <div className="relative w-full max-w-md bg-white rounded-t-3xl p-6 shadow-2xl z-10 space-y-3 pb-[calc(env(safe-area-inset-bottom)+1.8rem)] animate-in slide-in-from-bottom duration-150">
+            <div className="w-10 h-1 bg-zinc-200 rounded-full mx-auto mb-2" />
+            <h3 className="text-center font-serif italic text-lg text-zinc-900 mb-4">Share Your Memories</h3>
 
             <button
               onClick={() => cameraInputRef.current?.click()}
-              className="w-full py-3.5 px-4 bg-zinc-900 text-white rounded-2xl font-bold flex items-center justify-center space-x-2 active:scale-98 transition shadow"
+              className="w-full py-3.5 px-4 bg-zinc-900 text-white rounded-2xl font-bold text-sm flex items-center justify-center space-x-2 active:scale-98 transition shadow"
             >
               <Camera className="w-5 h-5 text-amber-400" />
-              <span>カメラで撮影する</span>
+              <span>カメラで写真を撮る</span>
             </button>
 
             <button
               onClick={() => albumInputRef.current?.click()}
-              className="w-full py-3.5 px-4 bg-zinc-100 text-zinc-800 rounded-2xl font-bold flex items-center justify-center space-x-2 active:scale-98 transition"
+              className="w-full py-3.5 px-4 bg-zinc-100 text-zinc-800 rounded-2xl font-bold text-sm flex items-center justify-center space-x-2 active:scale-98 transition"
             >
               <Sparkles className="w-5 h-5 text-indigo-500" />
-              <span>アルバムから選択</span>
+              <span>アルバムから選ぶ</span>
             </button>
 
             <button
               onClick={() => setIsActionSheetOpen(false)}
-              className="w-full py-3 text-zinc-400 font-medium text-sm active:text-zinc-600 transition"
+              className="w-full py-3 text-zinc-400 font-medium text-xs active:text-zinc-600 transition"
             >
               キャンセル
             </button>
@@ -1011,13 +1001,13 @@ export default function EventPhotoGalleryPage() {
       {/* お名前入力モーダル */}
       {isNameModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl space-y-4">
+          <div className="bg-white rounded-3xl p-7 w-full max-w-xs shadow-2xl space-y-5 border border-black/[0.04]">
             <div className="text-center">
-              <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3 border border-amber-200/60">
                 <UserCheck className="w-6 h-6" />
               </div>
-              <h3 className="font-bold text-zinc-800 text-base">お名前の登録</h3>
-              <p className="text-xs text-zinc-400 mt-1">
+              <h3 className="font-bold text-zinc-900 text-base">お名前の登録</h3>
+              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
                 新郎新婦へ伝わるお名前やニックネームをご入力ください
               </p>
             </div>
@@ -1029,7 +1019,7 @@ export default function EventPhotoGalleryPage() {
                 value={tempNameInput}
                 onChange={(e) => setTempNameInput(e.target.value)}
                 placeholder="例: 山田 / 新婦友人 あやか"
-                className="w-full text-center text-base font-bold py-3 bg-zinc-100 rounded-2xl border-none focus:ring-2 focus:ring-zinc-800"
+                className="w-full text-center text-sm font-bold py-3 bg-zinc-100 rounded-2xl border-none focus:ring-2 focus:ring-zinc-800"
                 autoFocus
                 required
               />
@@ -1041,7 +1031,7 @@ export default function EventPhotoGalleryPage() {
                     setIsNameModalOpen(false);
                     setPendingUploadFile(null);
                   }}
-                  className="w-1/3 py-3 text-xs font-medium text-zinc-500 bg-zinc-100 rounded-2xl"
+                  className="w-1/3 py-3 text-xs font-bold text-zinc-500 bg-zinc-100 rounded-2xl"
                 >
                   中止
                 </button>
@@ -1057,17 +1047,17 @@ export default function EventPhotoGalleryPage() {
         </div>
       )}
 
-      {/* ドロワーメニュー */}
+      {/* エレガントドロワーメニュー */}
       {isDrawerOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div
-            className="absolute inset-0 bg-black/40 transition-opacity"
+            className="absolute inset-0 bg-black/40 backdrop-blur-[1px] transition-opacity"
             onClick={() => setIsDrawerOpen(false)}
           />
-          <aside className="relative w-[80%] max-w-[320px] h-full bg-white shadow-2xl p-6 flex flex-col justify-between z-10 overflow-y-auto">
+          <aside className="relative w-[80%] max-w-[320px] h-full bg-[#FDFCFB] shadow-2xl p-6 flex flex-col justify-between z-10 overflow-y-auto">
             <div>
-              <div className="flex items-center justify-between pb-4 border-b border-zinc-100">
-                <h2 className="font-serif italic font-bold text-zinc-800 text-xl">Menu</h2>
+              <div className="flex items-center justify-between pb-4 border-b border-black/[0.05]">
+                <h2 className="font-serif italic font-bold text-zinc-900 text-xl tracking-wider">Menu</h2>
                 <button
                   onClick={() => setIsDrawerOpen(false)}
                   className="p-1 text-zinc-500 hover:text-zinc-800"
@@ -1077,9 +1067,9 @@ export default function EventPhotoGalleryPage() {
               </div>
 
               {/* ユーザー名カード */}
-              <div className="mt-4 p-3 bg-zinc-50 rounded-2xl flex items-center justify-between border border-zinc-100">
+              <div className="mt-4 p-3.5 bg-zinc-50/80 rounded-2xl flex items-center justify-between border border-black/[0.04]">
                 <div>
-                  <p className="text-[10px] text-zinc-400 font-bold uppercase">Guest Name</p>
+                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Guest Name</p>
                   <p className="text-sm font-bold text-zinc-800">{userName || '未設定（ゲスト）'}</p>
                 </div>
                 <button
@@ -1093,62 +1083,59 @@ export default function EventPhotoGalleryPage() {
                 </button>
               </div>
 
-              <nav className="mt-6 space-y-3">
+              <nav className="mt-6 space-y-2.5">
                 <button
                   onClick={() => {
                     setIsDrawerOpen(false);
                     setIsQrModalOpen(true);
                   }}
-                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl"
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-3 text-left font-medium active:bg-zinc-100 rounded-xl transition"
                 >
                   <QrCode className="w-5 h-5 text-zinc-500" />
-                  <span>参加用QRコード</span>
+                  <span className="text-sm">参加用QRコード</span>
                 </button>
 
                 <a
                   href={`/${eventId}/projector`}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl"
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-3 text-left font-medium active:bg-zinc-100 rounded-xl transition"
                 >
                   <Monitor className="w-5 h-5 text-indigo-500" />
-                  <span>プロジェクター投影画面</span>
+                  <span className="text-sm">プロジェクター投影画面</span>
                 </a>
 
                 {/* ホスト専用メニュー群 */}
                 {isHostMode && (
                   <>
-                    <div className="pt-2 pb-1 border-t border-zinc-100">
-                      <p className="text-[10px] text-amber-600 font-bold uppercase tracking-wider px-2">
-                        Host Admin Controls
+                    <div className="pt-3 pb-1 border-t border-black/[0.05]">
+                      <p className="text-[10px] text-amber-600 font-bold uppercase tracking-wider px-3">
+                        Host Controls
                       </p>
                     </div>
 
-                    {/* いいね投票締め切りトグル */}
                     <button
                       onClick={handleToggleLock}
-                      className={`flex items-center space-x-3 w-full py-2.5 px-2 text-left font-bold rounded-xl ${
-                        eventData.is_locked ? 'bg-amber-100 text-amber-900' : 'text-zinc-700 hover:bg-zinc-50'
+                      className={`flex items-center space-x-3 w-full py-2.5 px-3 text-left font-bold rounded-xl text-sm transition ${
+                        eventData.is_locked ? 'bg-amber-100/70 text-amber-950' : 'text-zinc-700 hover:bg-zinc-100'
                       }`}
                     >
                       <Lock className="w-5 h-5 text-amber-600" />
                       <span>{eventData.is_locked ? '投票ロック中（解除）' : 'いいね投票を締め切る'}</span>
                     </button>
 
-                    {/* 卓上配布カード画像生成 */}
                     <button
                       onClick={handleGenerateQrCard}
-                      className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl"
+                      className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-3 text-left font-medium active:bg-zinc-100 rounded-xl transition text-sm"
                     >
                       <Printer className="w-5 h-5 text-zinc-600" />
                       <span>卓上案内カードを保存</span>
                     </button>
 
-                    {/* 一括ZIPダウンロード */}
                     <button
                       disabled={isZipping}
                       onClick={handleDownloadAllZip}
-                      className="flex items-center space-x-3 text-amber-600 w-full py-2.5 px-2 text-left font-bold active:bg-amber-50 rounded-xl"
+                      className="flex items-center space-x-3 text-amber-700 w-full py-2.5 px-3 text-left font-bold active:bg-amber-50 rounded-xl text-sm transition"
                     >
                       <Archive className="w-5 h-5" />
                       <span>{isZipping ? `ZIP作成中 (${zipProgress}%)` : '全写真一括ダウンロード'}</span>
@@ -1165,7 +1152,7 @@ export default function EventPhotoGalleryPage() {
                       setIsPinModalOpen(true);
                     }
                   }}
-                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl pt-2 border-t border-zinc-100"
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-3 text-left font-medium active:bg-zinc-100 rounded-xl pt-2.5 border-t border-black/[0.05] transition text-sm"
                 >
                   {isHostMode ? (
                     <>
@@ -1182,8 +1169,8 @@ export default function EventPhotoGalleryPage() {
               </nav>
             </div>
 
-            <div className="text-xs text-zinc-400 space-y-1 pt-6">
-              <p>Guest ID: {userId.slice(0, 8)}...</p>
+            <div className="text-[11px] text-zinc-400 space-y-1 pt-6 font-mono">
+              <p>Guest: {userId.slice(0, 8)}...</p>
               <p>Wedding Snap Pro v1.2</p>
             </div>
           </aside>
@@ -1192,11 +1179,11 @@ export default function EventPhotoGalleryPage() {
 
       {/* ホストPIN認証モーダル */}
       {isPinModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-7 w-full max-w-xs shadow-2xl space-y-4">
             <div className="text-center">
               <Lock className="w-8 h-8 text-zinc-800 mx-auto mb-2" />
-              <h3 className="font-bold text-zinc-800 text-base">ホスト管理認証</h3>
+              <h3 className="font-bold text-zinc-900 text-base">ホスト管理認証</h3>
               <p className="text-xs text-zinc-400 mt-1">4桁のホストPINを入力してください</p>
             </div>
 
@@ -1217,13 +1204,13 @@ export default function EventPhotoGalleryPage() {
                 <button
                   type="button"
                   onClick={() => setIsPinModalOpen(false)}
-                  className="w-1/2 py-3 text-sm font-medium text-zinc-500 bg-zinc-100 rounded-2xl"
+                  className="w-1/2 py-3 text-xs font-bold text-zinc-500 bg-zinc-100 rounded-2xl"
                 >
                   閉じる
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-3 text-sm font-medium text-white bg-zinc-900 rounded-2xl shadow"
+                  className="w-1/2 py-3 text-xs font-bold text-white bg-zinc-900 rounded-2xl shadow"
                 >
                   ロック解除
                 </button>
@@ -1235,16 +1222,16 @@ export default function EventPhotoGalleryPage() {
 
       {/* QRコードモーダル */}
       {isQrModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl text-center space-y-4">
             <div className="flex justify-between items-center">
-              <h3 className="font-bold text-zinc-800 text-sm">会場配布用QRコード</h3>
+              <h3 className="font-bold text-zinc-900 text-sm">会場配布用QRコード</h3>
               <button onClick={() => setIsQrModalOpen(false)} className="p-1 text-zinc-400">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-3 bg-zinc-50 rounded-2xl flex justify-center">
+            <div className="p-3 bg-zinc-50 rounded-2xl flex justify-center border border-zinc-100">
               <img
                 src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
                   typeof window !== 'undefined' ? window.location.href : ''
@@ -1261,7 +1248,7 @@ export default function EventPhotoGalleryPage() {
                   alert('URLをコピーしました！');
                 }
               }}
-              className="w-full py-3 bg-zinc-900 text-white rounded-2xl text-xs font-medium flex items-center justify-center space-x-2 active:scale-98 transition shadow"
+              className="w-full py-3 bg-zinc-900 text-white rounded-2xl text-xs font-bold flex items-center justify-center space-x-2 active:scale-98 transition shadow"
             >
               <Copy className="w-4 h-4" />
               <span>参加URLをコピー</span>
