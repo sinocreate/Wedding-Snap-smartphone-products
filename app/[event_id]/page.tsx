@@ -72,7 +72,7 @@ type FilterType = 'ranking' | 'pickup' | 'mine' | null;
 
 const createThumbnailBlob = (file: File, maxDimension = 600, quality = 0.7): Promise<Blob> => {
   return new Promise((resolve) => {
-    const img = new Image();
+    const img = new window.Image();
     img.onload = () => {
       let { width, height } = img;
       if (width > height) {
@@ -129,7 +129,6 @@ export default function EventPhotoGalleryPage() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const albumInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. ユーザーID ＆ DBからいいね状態を直接復元
   useEffect(() => {
     let localUserId = localStorage.getItem('wedding_guest_uuid');
     if (!localUserId) {
@@ -160,7 +159,6 @@ export default function EventPhotoGalleryPage() {
     loadUserLikes();
   }, [eventId]);
 
-  // 2. 写真一覧取得 ＆ Realtime同期
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
@@ -223,7 +221,6 @@ export default function EventPhotoGalleryPage() {
     };
   }, [eventId]);
 
-  // 3. フィルタリング
   const filteredPhotos = useMemo(() => {
     let result = [...photos];
     if (activeFilter === 'ranking') {
@@ -236,7 +233,6 @@ export default function EventPhotoGalleryPage() {
     return result;
   }, [photos, activeFilter, userId]);
 
-  // 4. いいねトグル
   const toggleLike = async (photoId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const isLiked = myLikedPhotoIds.includes(photoId);
@@ -288,7 +284,6 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 5. 画像保存
   const handleDownload = async (photo: Photo, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     try {
@@ -314,7 +309,6 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 6. 2段階アップロード処理
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -398,7 +392,6 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
-  // 7. ホスト専用操作
   const handleTogglePickup = async (photo: Photo, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const newStatus = !photo.is_pickup;
@@ -430,7 +423,9 @@ export default function EventPhotoGalleryPage() {
         const script = document.createElement('script');
         script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
         document.body.appendChild(script);
-        await new Promise((resolve) => (script.onload = resolve));
+        await new Promise((resolve) => {
+          script.onload = resolve;
+        });
       }
 
       const JSZip = (window as any).JSZip;
@@ -584,4 +579,6 @@ export default function EventPhotoGalleryPage() {
           </button>
         </section>
 
-        {filteredPhotos.length =
+        {filteredPhotos.length === 0 ? (
+          <div className="w-full">
+            <div className="grid grid-cols-3 gap-[1px] bg-zinc-200 w
