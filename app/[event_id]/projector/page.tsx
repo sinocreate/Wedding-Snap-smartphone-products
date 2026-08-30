@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Trophy,
@@ -15,7 +15,8 @@ import {
   ChevronRight,
   ChevronLeft,
   X,
-  Sparkle,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -44,6 +45,7 @@ interface Photo {
   user_name?: string;
   likes_count: number;
   is_pickup: boolean;
+  is_hidden?: boolean;
   created_at: string;
 }
 
@@ -51,6 +53,66 @@ interface EventData {
   id: string;
   title: string;
 }
+
+// 外部音源不要のWeb Audio API シンセサイザー音響エンジン
+class SoundEngine {
+  private ctx: AudioContext | null = null;
+
+  private init() {
+    if (!this.ctx && typeof window !== 'undefined') {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      this.ctx = new AudioCtx();
+    }
+  }
+
+  // ドラムロール音生成
+  playDrumroll(duration = 2.0) {
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const interval = 0.08;
+    for (let t = 0; t < duration; t += interval) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(90 + Math.random() * 40, now + t);
+      gain.gain.setValueAtTime(0.2, now + t);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + t + 0.06);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now + t);
+      osc.stop(now + t + 0.06);
+    }
+  }
+
+  // ファンファーレ・歓声効果音
+  playFanfare() {
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const chords = [
+      { f: 523.25, t: 0.0, d: 0.15 }, // C5
+      { f: 659.25, t: 0.15, d: 0.15 }, // E5
+      { f: 783.99, t: 0.3, d: 0.15 }, // G5
+      { f: 1046.5, t: 0.45, d: 0.8 }, // C6
+    ];
+
+    chords.forEach((note) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(note.f, now + note.t);
+      gain.gain.setValueAtTime(0.3, now + note.t);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + note.t + note.d);
+      osc.connect(gain);
+      gain.connect(this.ctx!.destination);
+      osc.start(now + note.t);
+      osc.stop(now + note.t + note.d);
+    });
+  }
+}
+
+const sounds = new SoundEngine();
 
 export default function ProjectorLivePage() {
   const params = useParams();
@@ -62,11 +124,12 @@ export default function ProjectorLivePage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [newPostAlert, setNewPostAlert] = useState<Photo | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isSoundEnabled, setIsSoundEnabled] = useState(true);
   const [guestUrl, setGuestUrl] = useState('');
 
-  // 👑 ランキング発表モード状態
+  // 👑 ランキング発表モード
   const [isCeremonyOpen, setIsCeremonyOpen] = useState(false);
-  const [ceremonyStep, setCeremonyStep] = useState<number>(3); // 3 -> 2 -> 1
+  const [ceremonyStep, setCeremonyStep] = useState<number>(3);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -104,8 +167,10 @@ export default function ProjectorLivePage() {
           if (payload.eventType === 'INSERT') {
             if (newPhoto.event_id === eventId) {
               setPhotos((prev) => [newPhoto, ...prev]);
-              setNewPostAlert(newPhoto);
-              setTimeout(() => setNewPostAlert(null), 5000);
+              if (!newPhoto.is_hidden) {
+                setNewPostAlert(newPhoto);
+                setTimeout(() => setNewPostAlert(null), 5000);
+              }
             }
           } else if (payload.eventType === 'UPDATE') {
             if (newPhoto.event_id === eventId) {
@@ -123,11 +188,16 @@ export default function ProjectorLivePage() {
     };
   }, [eventId]);
 
-  const slideshowPhotos = useMemo(() => {
-    if (photos.length === 0) return [];
-    const pickups = photos.filter((p) => p.is_pickup);
-    return pickups.length > 0 ? pickups : photos;
+  // モデレーション非表示の写真を除外
+  const activePhotos = useMemo(() => {
+    return photos.filter((p) => !p.is_hidden);
   }, [photos]);
+
+  const slideshowPhotos = useMemo(() => {
+    if (activePhotos.length === 0) return [];
+    const pickups = activePhotos.filter((p) => p.is_pickup);
+    return pickups.length > 0 ? pickups : activePhotos;
+  }, [activePhotos]);
 
   useEffect(() => {
     if (slideshowPhotos.length <= 1 || isCeremonyOpen) return;
@@ -138,12 +208,12 @@ export default function ProjectorLivePage() {
   }, [slideshowPhotos.length, isCeremonyOpen]);
 
   const rankingPhotos = useMemo(() => {
-    return [...photos].sort((a, b) => b.likes_count - a.likes_count).slice(0, 3);
-  }, [photos]);
+    return [...activePhotos].sort((a, b) => b.likes_count - a.likes_count).slice(0, 3);
+  }, [activePhotos]);
 
   const latestPhotos = useMemo(() => {
-    return photos.slice(0, 4);
-  }, [photos]);
+    return activePhotos.slice(0, 4);
+  }, [activePhotos]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -155,7 +225,6 @@ export default function ProjectorLivePage() {
     }
   };
 
-  // 紙吹雪（Confetti）発射関数
   const fireConfetti = useCallback(async () => {
     if (typeof window === 'undefined') return;
     if (!(window as any).confetti) {
@@ -167,19 +236,24 @@ export default function ProjectorLivePage() {
     const confetti = (window as any).confetti;
     if (confetti) {
       confetti({
-        particleCount: 120,
-        spread: 100,
+        particleCount: 140,
+        spread: 120,
         origin: { y: 0.6 },
         colors: ['#fbbf24', '#f59e0b', '#ec4899', '#ffffff'],
       });
     }
   }, []);
 
-  // ステップ切り替え処理
   const handleSelectStep = (step: number) => {
     setCeremonyStep(step);
+    if (isSoundEnabled) {
+      sounds.playDrumroll(1.2);
+    }
     if (step === 1) {
-      fireConfetti();
+      setTimeout(() => {
+        fireConfetti();
+        if (isSoundEnabled) sounds.playFanfare();
+      }, 500);
     }
   };
 
@@ -193,7 +267,6 @@ export default function ProjectorLivePage() {
     else if (ceremonyStep === 2) handleSelectStep(3);
   };
 
-  // キーボード操作対応
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isCeremonyOpen) return;
@@ -205,7 +278,7 @@ export default function ProjectorLivePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isCeremonyOpen, ceremonyStep]);
 
-  const currentSlide = slideshowPhotos[currentIndex] || photos[0];
+  const currentSlide = slideshowPhotos[currentIndex] || activePhotos[0];
   const ceremonyTargetPhoto = rankingPhotos[ceremonyStep - 1];
 
   return (
@@ -227,6 +300,7 @@ export default function ProjectorLivePage() {
             onClick={() => {
               setCeremonyStep(3);
               setIsCeremonyOpen(true);
+              if (isSoundEnabled) sounds.playDrumroll(1.2);
             }}
             className="px-5 py-2.5 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-zinc-950 font-black rounded-xl text-sm flex items-center space-x-2 shadow-xl shadow-amber-500/20 active:scale-95 transition"
           >
@@ -234,8 +308,19 @@ export default function ProjectorLivePage() {
             <span>🏆 表彰式・ランキング発表</span>
           </button>
 
+          {/* サウンドON/OFF */}
+          <button
+            onClick={() => setIsSoundEnabled(!isSoundEnabled)}
+            className={`p-2 rounded-lg border transition ${
+              isSoundEnabled ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' : 'bg-zinc-800 text-zinc-500 border-zinc-700'
+            }`}
+            title={isSoundEnabled ? '効果音 ON' : '効果音 OFF'}
+          >
+            {isSoundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+          </button>
+
           <span className="text-sm text-zinc-400">
-            投稿枚数: <strong className="text-white text-base">{photos.length}</strong> 枚
+            投稿枚数: <strong className="text-white text-base">{activePhotos.length}</strong> 枚
           </span>
 
           <button
@@ -309,7 +394,7 @@ export default function ProjectorLivePage() {
 
         {/* 右側サイドパネル */}
         <div className="col-span-4 h-full flex flex-col space-y-4 overflow-hidden">
-          {/* QRコード */}
+          {/* QRコードカード */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-4 flex items-center space-x-4 shadow-xl shrink-0">
             <div className="p-2 bg-white rounded-2xl shrink-0">
               {guestUrl && (
@@ -405,7 +490,7 @@ export default function ProjectorLivePage() {
         </div>
       </div>
 
-      {/* 👑 表彰式・ランキング発表全画面モーダル（完全版） */}
+      {/* 👑 表彰式・ランキング発表全画面モーダル（音響SE・紙吹雪連動） */}
       {isCeremonyOpen && (
         <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-between p-8 animate-in fade-in duration-300 select-none">
           <div className="w-full flex justify-between items-center">
@@ -426,7 +511,6 @@ export default function ProjectorLivePage() {
           <div className="relative flex-1 w-full max-w-4xl flex flex-col items-center justify-center my-2">
             {ceremonyTargetPhoto ? (
               <div key={ceremonyStep} className="relative flex flex-col items-center animate-in zoom-in-90 fade-in duration-300">
-                {/* 順位クラウンバッジ */}
                 <div
                   className={`text-xl md:text-2xl font-black px-8 py-2.5 rounded-full mb-4 shadow-2xl flex items-center space-x-3 tracking-widest ${
                     ceremonyStep === 1
@@ -442,7 +526,6 @@ export default function ProjectorLivePage() {
                   </span>
                 </div>
 
-                {/* 受賞写真 */}
                 <div className={`max-h-[48vh] rounded-3xl overflow-hidden shadow-2xl bg-black border-4 ${
                   ceremonyStep === 1 ? 'border-amber-400 shadow-amber-500/30' : 'border-zinc-700'
                 }`}>
@@ -453,7 +536,6 @@ export default function ProjectorLivePage() {
                   />
                 </div>
 
-                {/* 撮影者名 ＆ いいね数 */}
                 <div className="mt-4 text-center space-y-1">
                   <h3 className="text-3xl md:text-4xl font-black text-white tracking-wide">
                     撮影者: <span className="text-amber-400 underline decoration-amber-500 underline-offset-8">{ceremonyTargetPhoto.user_name || 'ゲスト'}</span> 様
@@ -474,7 +556,6 @@ export default function ProjectorLivePage() {
 
           {/* 下部ナビゲーションコントローラー */}
           <div className="flex items-center space-x-4 bg-zinc-900/90 border border-zinc-800 px-6 py-3.5 rounded-3xl shadow-2xl">
-            {/* 前の順位へ */}
             <button
               disabled={ceremonyStep === 3}
               onClick={handlePrevStep}
@@ -486,7 +567,6 @@ export default function ProjectorLivePage() {
               <ChevronLeft className="w-5 h-5" />
             </button>
 
-            {/* 順位選択ボタン群 */}
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => handleSelectStep(3)}
@@ -522,7 +602,6 @@ export default function ProjectorLivePage() {
               </button>
             </div>
 
-            {/* 次の順位へ進むメインボタン */}
             {ceremonyStep > 1 && (
               <button
                 onClick={handleNextStep}
