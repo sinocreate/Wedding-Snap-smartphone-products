@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Trophy,
@@ -54,8 +54,8 @@ interface EventData {
   title: string;
 }
 
-// 外部音源不要のWeb Audio API シンセサイザー音響エンジン
-class SoundEngine {
+// 🌟 プロ品質・本格オーケストラ音響合成エンジン（Web Audio API）
+class RichSoundEngine {
   private ctx: AudioContext | null = null;
 
   private init() {
@@ -63,56 +63,208 @@ class SoundEngine {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       this.ctx = new AudioCtx();
     }
-  }
-
-  // ドラムロール音生成
-  playDrumroll(duration = 2.0) {
-    this.init();
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
-    const interval = 0.08;
-    for (let t = 0; t < duration; t += interval) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(90 + Math.random() * 40, now + t);
-      gain.gain.setValueAtTime(0.2, now + t);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + t + 0.06);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now + t);
-      osc.stop(now + t + 0.06);
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
     }
   }
 
-  // ファンファーレ・歓声効果音
+  // 大ホールの立体リバーブノードを作成
+  private createReverb(targetGain = 0.35) {
+    if (!this.ctx) return null;
+    const delay = this.ctx.createDelay();
+    delay.delayTime.value = 0.06;
+
+    const feedback = this.ctx.createGain();
+    feedback.gain.value = 0.45;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 3200;
+
+    const wet = this.ctx.createGain();
+    wet.gain.value = targetGain;
+
+    delay.connect(feedback);
+    feedback.connect(filter);
+    filter.connect(delay);
+    delay.connect(wet);
+    wet.connect(this.ctx.destination);
+
+    return delay;
+  }
+
+  // リアル・ドラムロール（スネアスナッピー ＋ クレッシェンド ＋ 決めのアタック）
+  playDrumroll(duration = 2.2) {
+    this.init();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime;
+    const steps = 38; // ロール打数
+    const stepDuration = duration / steps;
+
+    for (let i = 0; i < steps; i++) {
+      const t = now + i * stepDuration;
+      const progress = i / steps; // 0 -> 1（クレッシェンド）
+      const volume = 0.05 + Math.pow(progress, 2) * 0.45;
+
+      // 1. スネアのノイズ（スナッピー）
+      const bufferSize = this.ctx.sampleRate * 0.04;
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let j = 0; j < bufferSize; j++) {
+        data[j] = Math.random() * 2 - 1;
+      }
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 1200;
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(volume, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+      noise.start(t);
+
+      // 2. 胴鳴り（低音トーン）
+      const tone = this.ctx.createOscillator();
+      const toneGain = this.ctx.createGain();
+      tone.type = 'sine';
+      tone.frequency.setValueAtTime(140 + Math.random() * 20, t);
+      toneGain.gain.setValueAtTime(volume * 0.4, t);
+      toneGain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+
+      tone.connect(toneGain);
+      toneGain.connect(this.ctx.destination);
+      tone.start(t);
+      tone.stop(t + 0.04);
+    }
+  }
+
+  // 豪華な金管（ブラス）ノートを生成
+  private playBrassNote(freq: number, startTime: number, dur: number, maxVol = 0.25, reverbNode: any) {
+    if (!this.ctx) return;
+
+    // 2基のデチューンオシレーターでアンサンブルの厚みを創出
+    [-4, 4].forEach((detune) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      const filter = this.ctx!.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, startTime);
+      osc.detune.setValueAtTime(detune, startTime);
+
+      // 金管楽器の立ち上がり（ブラスリップの開閉フィルター）
+      filter.type = 'lowpass';
+      filter.Q.value = 2.5;
+      filter.frequency.setValueAtTime(600, startTime);
+      filter.frequency.exponentialRampToValueAtTime(4500, startTime + 0.08);
+      filter.frequency.exponentialRampToValueAtTime(2200, startTime + dur);
+
+      // 音量エンベロープ
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.linearRampToValueAtTime(maxVol, startTime + 0.05);
+      gain.gain.setValueAtTime(maxVol * 0.85, startTime + dur - 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur + 0.1);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx!.destination);
+      if (reverbNode) gain.connect(reverbNode);
+
+      osc.start(startTime);
+      osc.stop(startTime + dur + 0.15);
+    });
+  }
+
+  // シンバルクラッシュ音（ホワイトノイズ ＋ 空間減衰）
+  private playCymbal(startTime: number, reverbNode: any) {
+    if (!this.ctx) return;
+    const dur = 2.5;
+    const bufferSize = this.ctx.sampleRate * dur;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 6500;
+    filter.Q.value = 1.2;
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.4, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + dur);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    if (reverbNode) gain.connect(reverbNode);
+
+    noise.start(startTime);
+  }
+
+  // ティンパニアタック（重低音ピッチベンド）
+  private playTimpani(startTime: number) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(95, startTime);
+    osc.frequency.exponentialRampToValueAtTime(45, startTime + 0.4);
+
+    gain.gain.setValueAtTime(0.6, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.6);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(startTime);
+    osc.stop(startTime + 0.65);
+  }
+
+  // 👑 本格オーケストラ・ファンファーレ（ブラス重奏 ＋ シンバル ＋ ティンパニ ＋ 残響）
   playFanfare() {
     this.init();
     if (!this.ctx) return;
-    const now = this.ctx.currentTime;
-    const chords = [
-      { f: 523.25, t: 0.0, d: 0.15 }, // C5
-      { f: 659.25, t: 0.15, d: 0.15 }, // E5
-      { f: 783.99, t: 0.3, d: 0.15 }, // G5
-      { f: 1046.5, t: 0.45, d: 0.8 }, // C6
-    ];
 
-    chords.forEach((note) => {
-      const osc = this.ctx!.createOscillator();
-      const gain = this.ctx!.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(note.f, now + note.t);
-      gain.gain.setValueAtTime(0.3, now + note.t);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + note.t + note.d);
-      osc.connect(gain);
-      gain.connect(this.ctx!.destination);
-      osc.start(now + note.t);
-      osc.stop(now + note.t + note.d);
+    const now = this.ctx.currentTime + 0.05;
+    const reverb = this.createReverb(0.4);
+
+    // 祝典ファンファーレフレーズ（タ・タ・タ・ジャーン！）
+    // 1. タ (ド / C5)
+    this.playBrassNote(523.25, now, 0.12, 0.25, reverb);
+    // 2. タ (ミ / E5)
+    this.playBrassNote(659.25, now + 0.14, 0.12, 0.25, reverb);
+    // 3. タ (ソ / G5)
+    this.playBrassNote(783.99, now + 0.28, 0.14, 0.28, reverb);
+
+    // 4. ジャーーン！（フルオーケストラ大和音: C4 + G4 + C5 + E5 + G5 + C6）
+    const chordTime = now + 0.44;
+    const chordDuration = 2.4;
+
+    [261.63, 392.0, 523.25, 659.25, 783.99, 1046.5].forEach((freq) => {
+      this.playBrassNote(freq, chordTime, chordDuration, 0.2, reverb);
     });
+
+    // シンバルクラッシュ ＆ ティンパニ同時発音
+    this.playCymbal(chordTime, reverb);
+    this.playTimpani(chordTime);
   }
 }
 
-const sounds = new SoundEngine();
+const sounds = new RichSoundEngine();
 
 export default function ProjectorLivePage() {
   const params = useParams();
@@ -188,7 +340,6 @@ export default function ProjectorLivePage() {
     };
   }, [eventId]);
 
-  // モデレーション非表示の写真を除外
   const activePhotos = useMemo(() => {
     return photos.filter((p) => !p.is_hidden);
   }, [photos]);
@@ -236,8 +387,8 @@ export default function ProjectorLivePage() {
     const confetti = (window as any).confetti;
     if (confetti) {
       confetti({
-        particleCount: 140,
-        spread: 120,
+        particleCount: 150,
+        spread: 130,
         origin: { y: 0.6 },
         colors: ['#fbbf24', '#f59e0b', '#ec4899', '#ffffff'],
       });
@@ -253,7 +404,7 @@ export default function ProjectorLivePage() {
       setTimeout(() => {
         fireConfetti();
         if (isSoundEnabled) sounds.playFanfare();
-      }, 500);
+      }, 400);
     }
   };
 
@@ -308,7 +459,6 @@ export default function ProjectorLivePage() {
             <span>🏆 表彰式・ランキング発表</span>
           </button>
 
-          {/* サウンドON/OFF */}
           <button
             onClick={() => setIsSoundEnabled(!isSoundEnabled)}
             className={`p-2 rounded-lg border transition ${
@@ -490,7 +640,7 @@ export default function ProjectorLivePage() {
         </div>
       </div>
 
-      {/* 👑 表彰式・ランキング発表全画面モーダル（音響SE・紙吹雪連動） */}
+      {/* 👑 表彰式・ランキング発表全画面モーダル（重厚オーケストラ音響連動） */}
       {isCeremonyOpen && (
         <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-between p-8 animate-in fade-in duration-300 select-none">
           <div className="w-full flex justify-between items-center">
