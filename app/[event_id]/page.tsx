@@ -24,6 +24,9 @@ import {
   ChevronRight,
   Archive,
   UserCheck,
+  Printer,
+  EyeOff,
+  AlertCircle,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -39,9 +42,7 @@ const getCleanSupabaseUrl = () => {
 
 const supabaseUrl = getCleanSupabaseUrl();
 const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
-const supabase = createClient(supabaseUrl, supabaseAnonKey || 'placeholder', {
-  realtime: { params: { eventsPerSecond: 20 } },
-});
+const supabase = createClient(supabaseUrl, supabaseAnonKey || 'placeholder');
 
 interface Photo {
   id: string;
@@ -55,6 +56,7 @@ interface Photo {
   user_name?: string;
   likes_count: number;
   is_pickup: boolean;
+  is_hidden?: boolean;
   created_at: string;
 }
 
@@ -62,11 +64,12 @@ interface EventData {
   id: string;
   title: string;
   host_pin: string;
+  is_locked?: boolean;
 }
 
 type FilterType = 'ranking' | 'pickup' | 'mine' | null;
 
-const createThumbnailBlob = (file: File, maxDimension = 600, quality = 0.7): Promise<Blob> => {
+const createThumbnailBlob = (file: File, maxDimension = 600, quality = 0.75): Promise<Blob> => {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') return resolve(file);
     const img = document.createElement('img');
@@ -102,7 +105,7 @@ export default function EventPhotoGalleryPage() {
   const rawParam = Array.isArray(params?.event_id) ? params.event_id[0] : params?.event_id;
   const eventId = (rawParam || 'demo-wedding').replace(/[^a-zA-Z0-9_-]/g, '') || 'demo-wedding';
 
-  const [eventData, setEventData] = useState<EventData>({ id: eventId, title: 'Wedding Snap', host_pin: '1234' });
+  const [eventData, setEventData] = useState<EventData>({ id: eventId, title: 'Wedding Snap', host_pin: '1234', is_locked: false });
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterType>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
@@ -116,8 +119,12 @@ export default function EventPhotoGalleryPage() {
   const [myLikedPhotoIds, setMyLikedPhotoIds] = useState<string[]>([]);
   const [savedPhotoIds, setSavedPhotoIds] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState('');
   const [isZipping, setIsZipping] = useState(false);
   const [zipProgress, setZipProgress] = useState(0);
+
+  // マイクロアニメーション用ステート
+  const [bouncingLikeId, setBouncingLikeId] = useState<string | null>(null);
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
@@ -126,15 +133,18 @@ export default function EventPhotoGalleryPage() {
   const [isHostMode, setIsHostMode] = useState(false);
   const [pinInput, setPinInput] = useState('');
 
-  // 高速スワイプ判定用
   const touchStartX = useRef<number>(0);
   const touchStartTime = useRef<number>(0);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const albumInputRef = useRef<HTMLInputElement>(null);
 
+  // データ同期
   const fetchAllData = useCallback(async (currentUid: string) => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
+
+    const { data: eventRow } = await supabase.from('events').select('*').eq('id', eventId).single();
+    if (eventRow) setEventData(eventRow);
 
     const { data: photosData } = await supabase
       .from('photos')
@@ -182,20 +192,10 @@ export default function EventPhotoGalleryPage() {
     const hostSession = sessionStorage.getItem(`host_auth_${eventId}`);
     if (hostSession === 'true') setIsHostMode(true);
 
-    const initEvent = async () => {
-      const { data } = await supabase.from('events').select('*').eq('id', eventId).single();
-      if (data) {
-        setEventData(data);
-      } else {
-        const defaultEvt = { id: eventId, title: 'Wedding Snap', host_pin: '1234' };
-        await supabase.from('events').upsert(defaultEvt);
-        setEventData(defaultEvt);
-      }
-    };
-    initEvent();
     fetchAllData(localUserId);
   }, [eventId, fetchAllData]);
 
+  // Realtime購読（負荷ゼロの差分検知）
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
@@ -217,9 +217,7 @@ export default function EventPhotoGalleryPage() {
             }
           } else if (payload.eventType === 'UPDATE') {
             if (newRow && newRow.event_id === eventId) {
-              setPhotos((prev) =>
-                prev.map((p) => (p.id === newRow.id ? { ...p, ...newRow } : p))
-              );
+              setPhotos((prev) => prev.map((p) => (p.id === newRow.id ? { ...p, ...newRow } : p)));
             }
           } else if (payload.eventType === 'DELETE') {
             if (oldRow && oldRow.id) {
@@ -228,20 +226,25 @@ export default function EventPhotoGalleryPage() {
           }
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'events' },
+        (payload) => {
+          const newEvt = payload.new as EventData;
+          if (newEvt && newEvt.id === eventId) {
+            setEventData((prev) => ({ ...prev, ...newEvt }));
+          }
+        }
+      )
       .subscribe();
-
-    const interval = setInterval(() => {
-      if (userId) fetchAllData(userId);
-    }, 6000);
 
     return () => {
       supabase.removeChannel(channel);
-      clearInterval(interval);
     };
-  }, [eventId, userId, fetchAllData]);
+  }, [eventId]);
 
   const filteredPhotos = useMemo(() => {
-    const result = [...photos];
+    let result = photos.filter((p) => isHostMode || !p.is_hidden);
     if (activeFilter === 'ranking') {
       result.sort((a, b) => b.likes_count - a.likes_count);
     } else if (activeFilter === 'pickup') {
@@ -250,16 +253,27 @@ export default function EventPhotoGalleryPage() {
       return result.filter((p) => p.user_id === userId);
     }
     return result;
-  }, [photos, activeFilter, userId]);
+  }, [photos, activeFilter, userId, isHostMode]);
 
+  // いいねトグル（ロック判定・弾けるアニメーション付き）
   const toggleLike = async (photoId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+
+    if (eventData.is_locked) {
+      alert('現在、いいねの投票は締め切られています');
+      return;
+    }
+
     const isLiked = myLikedPhotoIds.includes(photoId);
 
     if (!isLiked && myLikedPhotoIds.length >= 3) {
       alert('いいねは1人最大3枚までです！');
       return;
     }
+
+    // アニメーション発火
+    setBouncingLikeId(photoId);
+    setTimeout(() => setBouncingLikeId(null), 300);
 
     const nextLikes = isLiked
       ? myLikedPhotoIds.filter((id) => id !== photoId)
@@ -323,9 +337,22 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
+  // セキュリティ＆進捗付きアップロード処理
   const executeUpload = async (file: File, nameToUse: string) => {
+    // 1. 拡張子/MIMEタイプチェック
+    if (!file.type.startsWith('image/')) {
+      alert('画像ファイル（JPEG / PNG / WEBP / HEIC 等）のみアップロード可能です');
+      return;
+    }
+    // 2. サイズ上限チェック（15MB）
+    if (file.size > 15 * 1024 * 1024) {
+      alert('写真のサイズが大きすぎます（15MB以下にしてください）');
+      return;
+    }
+
     try {
       setIsUploading(true);
+      setUploadProgressText('最適化中...');
       setIsActionSheetOpen(false);
 
       const timestamp = Date.now();
@@ -333,7 +360,9 @@ export default function EventPhotoGalleryPage() {
       const thumbFileName = `thumb_${eventId}_${timestamp}_${rand}.jpg`;
       const originalFileName = `hd_${eventId}_${timestamp}_${rand}.jpg`;
 
-      const thumbBlob = await createThumbnailBlob(file, 600, 0.7);
+      const thumbBlob = await createThumbnailBlob(file, 600, 0.75);
+
+      setUploadProgressText('送信中...');
       const { data: thumbData, error: thumbError } = await supabase.storage
         .from('wedding-photos')
         .upload(thumbFileName, thumbBlob, {
@@ -341,11 +370,9 @@ export default function EventPhotoGalleryPage() {
           upsert: true,
         });
 
-      if (thumbError) throw new Error(`サムネイル送信失敗: ${thumbError.message}`);
+      if (thumbError) throw new Error(`送信失敗: ${thumbError.message}`);
 
-      const {
-        data: { publicUrl: thumbPublicUrl },
-      } = supabase.storage.from('wedding-photos').getPublicUrl(thumbData.path);
+      const { data: { publicUrl: thumbPublicUrl } } = supabase.storage.from('wedding-photos').getPublicUrl(thumbData.path);
 
       const { data: insertedPhoto, error: dbError } = await supabase
         .from('photos')
@@ -360,6 +387,7 @@ export default function EventPhotoGalleryPage() {
           user_name: nameToUse || 'ゲスト',
           likes_count: 0,
           is_pickup: false,
+          is_hidden: false,
         })
         .select()
         .single();
@@ -367,7 +395,9 @@ export default function EventPhotoGalleryPage() {
       if (dbError) throw new Error(`DB保存失敗: ${dbError.message}`);
 
       setIsUploading(false);
+      setUploadProgressText('');
 
+      // バックグラウンドでHD送信
       (async () => {
         try {
           const { data: hdData, error: hdError } = await supabase.storage
@@ -378,17 +408,10 @@ export default function EventPhotoGalleryPage() {
             });
 
           if (!hdError && hdData) {
-            const {
-              data: { publicUrl: hdPublicUrl },
-            } = supabase.storage.from('wedding-photos').getPublicUrl(hdData.path);
-
+            const { data: { publicUrl: hdPublicUrl } } = supabase.storage.from('wedding-photos').getPublicUrl(hdData.path);
             await supabase
               .from('photos')
-              .update({
-                original_url: hdPublicUrl,
-                public_url: hdPublicUrl,
-                is_hd_ready: true,
-              })
+              .update({ original_url: hdPublicUrl, public_url: hdPublicUrl, is_hd_ready: true })
               .eq('id', insertedPhoto.id);
           }
         } catch (bgErr) {
@@ -398,6 +421,7 @@ export default function EventPhotoGalleryPage() {
     } catch (err: any) {
       alert(err.message || 'アップロードに失敗しました');
       setIsUploading(false);
+      setUploadProgressText('');
     } finally {
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       if (albumInputRef.current) albumInputRef.current.value = '';
@@ -430,6 +454,13 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
+  // ホスト機能
+  const handleToggleLock = async () => {
+    const nextLocked = !eventData.is_locked;
+    setEventData((prev) => ({ ...prev, is_locked: nextLocked }));
+    await supabase.from('events').update({ is_locked: nextLocked }).eq('id', eventId);
+  };
+
   const handleTogglePickup = async (photo: Photo, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const newStatus = !photo.is_pickup;
@@ -437,10 +468,16 @@ export default function EventPhotoGalleryPage() {
     await supabase.from('photos').update({ is_pickup: newStatus }).eq('id', photo.id);
   };
 
+  const handleToggleHide = async (photo: Photo, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const newHidden = !photo.is_hidden;
+    setPhotos((prev) => prev.map((p) => (p.id === photo.id ? { ...p, is_hidden: newHidden } : p)));
+    await supabase.from('photos').update({ is_hidden: newHidden }).eq('id', photo.id);
+  };
+
   const handleDeletePhoto = async (photo: Photo, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!confirm('この写真を削除しますか？（復元できません）')) return;
-
     setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
     if (previewIndex !== null) setPreviewIndex(null);
     await supabase.from('photos').delete().eq('id', photo.id);
@@ -498,6 +535,63 @@ export default function EventPhotoGalleryPage() {
     }
   };
 
+  // 卓上案内カード画像の自動生成・保存
+  const handleGenerateQrCard = () => {
+    if (typeof window === 'undefined') return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1200;
+    canvas.height = 1600;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // 背景
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 金色の外枠
+    ctx.strokeStyle = '#D4AF37';
+    ctx.lineWidth = 12;
+    ctx.strokeRect(60, 60, canvas.width - 120, canvas.height - 120);
+
+    // タイトル
+    ctx.fillStyle = '#18181B';
+    ctx.font = 'italic 72px "Times New Roman", serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Wedding Photo Share', 600, 260);
+
+    ctx.font = 'bold 44px sans-serif';
+    ctx.fillStyle = '#3F3F46';
+    ctx.fillText(eventData.title, 600, 360);
+
+    ctx.font = '32px sans-serif';
+    ctx.fillStyle = '#71717A';
+    ctx.fillText('本日はご列席いただき誠にありがとうございます', 600, 460);
+    ctx.fillText('皆さまが撮影した素敵な写真をぜひ共有してください', 600, 520);
+
+    // QRコード描画
+    const qrImg = new Image();
+    qrImg.crossOrigin = 'anonymous';
+    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(window.location.href)}`;
+    qrImg.onload = () => {
+      ctx.drawImage(qrImg, 350, 640, 500, 500);
+
+      ctx.font = 'bold 36px sans-serif';
+      ctx.fillStyle = '#18181B';
+      ctx.fillText('QRコードをスマホのカメラで読み取って参加', 600, 1260);
+
+      ctx.font = '28px sans-serif';
+      ctx.fillStyle = '#A1A1AA';
+      ctx.fillText('アプリのインストールや面倒な登録は不要です', 600, 1340);
+
+      const cardUrl = canvas.toDataURL('image/jpeg', 0.95);
+      const link = document.createElement('a');
+      link.href = cardUrl;
+      link.download = `table_card_${eventId}.jpg`;
+      link.click();
+      alert('卓上案内カードの画像をダウンロードしました！\n印刷してテーブルに飾っていただけます。');
+    };
+  };
+
   const handleVerifyPin = (e: React.FormEvent) => {
     e.preventDefault();
     if (pinInput === eventData.host_pin) {
@@ -529,7 +623,6 @@ export default function EventPhotoGalleryPage() {
     setPreviewIndex((prev) => (prev !== null && prev < filteredPhotos.length - 1 ? prev + 1 : 0));
   }, [previewIndex, filteredPhotos.length]);
 
-  // 高速スワイプ判定（時差・不発ゼロ化）
   const onTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.targetTouches[0].clientX;
     touchStartTime.current = Date.now();
@@ -540,21 +633,14 @@ export default function EventPhotoGalleryPage() {
     const diffX = endX - touchStartX.current;
     const diffTime = Date.now() - touchStartTime.current;
 
-    // 距離が40px以上、または300ms以内の素早いフリックで即座に切り替え
-    const isFlick = diffTime < 300 && Math.abs(diffX) > 25;
-    const isDrag = Math.abs(diffX) > 45;
-
-    if (isFlick || isDrag) {
-      if (diffX < 0) {
-        handleNextPreview();
-      } else {
-        handlePrevPreview();
-      }
+    if (diffTime < 350 && Math.abs(diffX) > 30) {
+      if (diffX < 0) handleNextPreview();
+      else handlePrevPreview();
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#F0EFEB] flex justify-center selection:bg-zinc-200">
+    <div className="min-h-screen bg-[#F0EFEB] flex justify-center selection:bg-zinc-200 font-sans">
       <main className="w-full max-w-md min-h-screen bg-white relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6rem)] overflow-y-auto overflow-x-hidden">
         {/* ホストモード稼働中バナー */}
         {isHostMode && (
@@ -569,10 +655,18 @@ export default function EventPhotoGalleryPage() {
           </div>
         )}
 
+        {/* 投票締め切り告知バナー */}
+        {eventData.is_locked && (
+          <div className="bg-zinc-900 text-amber-400 text-xs font-bold px-4 py-2 flex items-center justify-center space-x-1.5 text-center shadow">
+            <AlertCircle className="w-3.5 h-3.5" />
+            <span>いいね投票は締め切られました（閲覧・保存は可能です）</span>
+          </div>
+        )}
+
         {/* 固定ヘッダー */}
         <header className="sticky top-0 z-40 w-full bg-zinc-100/90 backdrop-blur-sm border-b border-zinc-200 px-4 py-3 flex items-center justify-between">
           <div className="w-6" />
-          <h1 className="font-serif italic text-[clamp(1.1rem,4.5vw,1.25rem)] tracking-wider text-zinc-800 select-none">
+          <h1 className="font-serif italic text-[clamp(1.15rem,4.5vw,1.35rem)] tracking-wider text-zinc-800 select-none">
             {eventData.title}
           </h1>
           <button
@@ -588,8 +682,8 @@ export default function EventPhotoGalleryPage() {
         <section className="flex justify-between items-center w-full px-6 py-4">
           <button
             onClick={() => setActiveFilter(activeFilter === 'ranking' ? null : 'ranking')}
-            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow flex flex-col items-center justify-center transition-transform active:scale-95 ${
-              activeFilter === 'ranking' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105' : ''
+            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow-sm flex flex-col items-center justify-center transition-all active:scale-95 border border-zinc-100 ${
+              activeFilter === 'ranking' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105 shadow-md' : ''
             }`}
           >
             <Trophy className="w-5 h-5 text-amber-500 mb-1" strokeWidth={1.5} />
@@ -600,8 +694,8 @@ export default function EventPhotoGalleryPage() {
 
           <button
             onClick={() => setActiveFilter(activeFilter === 'pickup' ? null : 'pickup')}
-            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow flex flex-col items-center justify-center transition-transform active:scale-95 ${
-              activeFilter === 'pickup' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105' : ''
+            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow-sm flex flex-col items-center justify-center transition-all active:scale-95 border border-zinc-100 ${
+              activeFilter === 'pickup' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105 shadow-md' : ''
             }`}
           >
             <Sparkles className="w-5 h-5 text-indigo-500 mb-1" strokeWidth={1.5} />
@@ -612,8 +706,8 @@ export default function EventPhotoGalleryPage() {
 
           <button
             onClick={() => setActiveFilter(activeFilter === 'mine' ? null : 'mine')}
-            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow flex flex-col items-center justify-center transition-transform active:scale-95 ${
-              activeFilter === 'mine' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105' : ''
+            className={`w-[26%] max-w-[90px] aspect-square rounded-full bg-white shadow-sm flex flex-col items-center justify-center transition-all active:scale-95 border border-zinc-100 ${
+              activeFilter === 'mine' ? 'ring-2 ring-zinc-800 ring-offset-2 scale-105 shadow-md' : ''
             }`}
           >
             <User className="w-5 h-5 text-emerald-500 mb-1" strokeWidth={1.5} />
@@ -623,7 +717,7 @@ export default function EventPhotoGalleryPage() {
           </button>
         </section>
 
-        {/* 3カラム正方形写真グリッド */}
+        {/* 3カラム写真グリッド */}
         {filteredPhotos.length === 0 ? (
           <div className="w-full">
             <div className="grid grid-cols-3 gap-[1px] bg-zinc-200 w-full">
@@ -637,10 +731,10 @@ export default function EventPhotoGalleryPage() {
                 </div>
               ))}
             </div>
-            <div className="py-8 text-center px-4">
-              <p className="text-sm font-medium text-zinc-600 mb-1">写真がまだありません</p>
+            <div className="py-12 text-center px-4">
+              <p className="text-sm font-bold text-zinc-700 mb-1">写真がまだありません</p>
               <p className="text-xs text-zinc-400">
-                右下のカメラボタンから写真を追加してください
+                右下のカメラボタンから最初の想い出をシェアしてください
               </p>
             </div>
           </div>
@@ -650,6 +744,7 @@ export default function EventPhotoGalleryPage() {
               const isLiked = myLikedPhotoIds.includes(photo.id);
               const isSaved = savedPhotoIds.includes(photo.id);
               const displayUrl = photo.thumb_url || photo.public_url;
+              const isBouncing = bouncingLikeId === photo.id;
 
               return (
                 <div
@@ -664,36 +759,50 @@ export default function EventPhotoGalleryPage() {
                     loading="lazy"
                   />
 
+                  {/* 左下いいね数 */}
                   <span className="absolute bottom-1.5 left-1.5 text-[clamp(0.65rem,2.5vw,0.75rem)] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] z-10 pointer-events-none">
                     {photo.likes_count}
                   </span>
 
+                  {/* Pickupバッジ */}
                   {photo.is_pickup && (
                     <div className="absolute top-1.5 left-1.5 z-10 pointer-events-none">
                       <Star className="w-4 h-4 fill-amber-400 text-amber-400 drop-shadow" />
                     </div>
                   )}
 
-                  {isHostMode && photo.user_name && (
-                    <div className="absolute top-1.5 left-1.5 z-10 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-amber-300 font-bold max-w-[80%] truncate">
+                  {/* 非表示（モデレーション中）バッジ */}
+                  {photo.is_hidden && (
+                    <div className="absolute top-1.5 left-1.5 z-10 bg-red-600/90 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                      非表示中
+                    </div>
+                  )}
+
+                  {/* ホストモード時：投稿者名バッジ */}
+                  {isHostMode && photo.user_name && !photo.is_hidden && (
+                    <div className="absolute top-1.5 left-1.5 z-10 bg-black/75 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-amber-300 font-bold max-w-[80%] truncate">
                       {photo.user_name}
                     </div>
                   )}
 
+                  {/* 右下ハートトグル（弾けるアニメーション付き） */}
                   <button
                     onClick={(e) => toggleLike(photo.id, e)}
-                    className="absolute bottom-1.5 right-1.5 z-20 p-1 active:scale-125 transition-transform"
+                    className={`absolute bottom-1.5 right-1.5 z-20 p-1 transition-transform duration-200 ${
+                      isBouncing ? 'scale-150' : 'active:scale-125'
+                    }`}
                     aria-label="いいね"
                   >
                     <Heart
                       className={`w-4 h-4 ${
                         isLiked
                           ? 'fill-pink-500 text-pink-500'
-                          : 'text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]'
+                          : 'text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]'
                       }`}
                     />
                   </button>
 
+                  {/* 右上保存済みバッジ */}
                   {isSaved && (
                     <div className="absolute top-1.5 right-1.5 z-10 pointer-events-none">
                       <CheckCircle2 className="w-4 h-4 fill-emerald-500 text-white drop-shadow" />
@@ -706,113 +815,127 @@ export default function EventPhotoGalleryPage() {
         )}
       </main>
 
-      {/* 高速スワイプ対応プレビューモーダル */}
+      {/* 🌟 没入型・全画面（フルスクリーン）プレビューモーダル */}
       {currentPhoto && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 animate-in fade-in duration-100 select-none"
+          className="fixed inset-0 z-50 bg-black flex flex-col justify-between select-none animate-in fade-in duration-150"
           onTouchStart={onTouchStart}
           onTouchEnd={onTouchEnd}
         >
-          <div className="absolute inset-0" onClick={() => setPreviewIndex(null)} />
-
-          <div className="relative w-full max-w-sm max-h-[85vh] flex flex-col items-center justify-between z-10 pointer-events-auto">
-            {/* 上部バー */}
-            <div className="w-full flex items-center justify-between pb-2 text-white">
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-mono font-medium text-zinc-400">
-                  {previewIndex! + 1} / {filteredPhotos.length}
-                </span>
-                {isHostMode && (
-                  <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-medium">
-                    投稿者: {currentPhoto.user_name || 'ゲスト'}
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={() => setPreviewIndex(null)}
-                className="p-2 rounded-full bg-white/10 text-white active:scale-95 transition-transform"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* 写真本体 */}
-            <div className="relative w-full max-h-[60vh] h-[55vh] flex items-center justify-center overflow-hidden">
-              <button
-                onClick={handlePrevPreview}
-                className="hidden sm:flex absolute left-2 z-20 p-2 rounded-full bg-black/50 text-white"
-              >
-                <ChevronLeft className="w-6 h-6" />
-              </button>
-
-              <div className="relative w-full h-full flex items-center justify-center">
-                <img
-                  key={currentPhoto.id}
-                  src={currentPhoto.original_url || currentPhoto.thumb_url || currentPhoto.public_url}
-                  alt="Current"
-                  className="max-h-[55vh] max-w-full object-contain rounded-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-150"
-                />
-              </div>
-
-              <button
-                onClick={handleNextPreview}
-                className="hidden sm:flex absolute right-2 z-20 p-2 rounded-full bg-black/50 text-white"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* 下部アクションバー */}
-            <div className="w-full mt-4 bg-zinc-900 rounded-2xl px-5 py-3.5 flex items-center justify-between shadow-2xl border border-white/10">
-              <button
-                onClick={() => toggleLike(currentPhoto.id)}
-                className="flex items-center space-x-2 text-white active:scale-95 transition-transform"
-              >
-                <Heart
-                  className={`w-6 h-6 ${
-                    myLikedPhotoIds.includes(currentPhoto.id)
-                      ? 'fill-pink-500 text-pink-500'
-                      : 'text-zinc-300'
-                  }`}
-                />
-                <span className="font-bold text-sm text-zinc-100">{currentPhoto.likes_count}</span>
-              </button>
-
-              <button
-                onClick={() => handleDownload(currentPhoto)}
-                className="flex items-center space-x-1.5 px-4 py-2 bg-white/15 hover:bg-white/25 active:scale-95 text-white rounded-xl text-xs font-semibold transition-transform"
-              >
-                <Download className="w-4 h-4" />
-                <span>{savedPhotoIds.includes(currentPhoto.id) ? '保存済み' : '端末に保存'}</span>
-              </button>
-
+          {/* 上部オーバーレイバー（半透明フロストグラデーション） */}
+          <div className="w-full z-20 bg-gradient-to-b from-black/80 via-black/40 to-transparent p-4 flex items-center justify-between text-white">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-mono font-bold text-zinc-300 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm">
+                {previewIndex! + 1} / {filteredPhotos.length}
+              </span>
               {isHostMode && (
-                <div className="flex items-center space-x-2 pl-2 border-l border-white/20">
-                  <button
-                    onClick={() => handleTogglePickup(currentPhoto)}
-                    className={`p-2 rounded-xl active:scale-95 transition-transform ${
-                      currentPhoto.is_pickup
-                        ? 'bg-amber-400 text-zinc-950 font-bold'
-                        : 'bg-white/15 text-white'
-                    }`}
-                    title="Pickup"
-                  >
-                    <Star className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDeletePhoto(currentPhoto)}
-                    className="p-2 rounded-xl bg-red-500 text-white active:scale-95 transition-transform"
-                    title="削除"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded-full font-bold backdrop-blur-sm">
+                  撮影者: {currentPhoto.user_name || 'ゲスト'} 様
+                </span>
               )}
             </div>
+            <button
+              onClick={() => setPreviewIndex(null)}
+              className="p-2 rounded-full bg-white/20 hover:bg-white/30 text-white active:scale-90 transition backdrop-blur-sm"
+              aria-label="閉じる"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+
+          {/* 写真本体（全画面フルサイズ描画） */}
+          <div className="relative flex-1 w-full h-full flex items-center justify-center overflow-hidden">
+            <button
+              onClick={handlePrevPreview}
+              className="hidden sm:flex absolute left-4 z-20 p-3 rounded-full bg-black/40 text-white hover:bg-black/60 transition"
+            >
+              <ChevronLeft className="w-7 h-7" />
+            </button>
+
+            <img
+              key={currentPhoto.id}
+              src={currentPhoto.original_url || currentPhoto.thumb_url || currentPhoto.public_url}
+              alt="Full view"
+              className="w-full h-full object-contain select-none"
+            />
+
+            <button
+              onClick={handleNextPreview}
+              className="hidden sm:flex absolute right-4 z-20 p-3 rounded-full bg-black/40 text-white hover:bg-black/60 transition"
+            >
+              <ChevronRight className="w-7 h-7" />
+            </button>
+          </div>
+
+          {/* 下部オーバーレイ操作バー（薄い半透明フロストグラス） */}
+          <div className="w-full z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] flex items-center justify-between text-white">
+            {/* いいねボタン */}
+            <button
+              onClick={() => toggleLike(currentPhoto.id)}
+              className={`flex items-center space-x-2 bg-white/15 backdrop-blur-md px-4 py-2.5 rounded-2xl transition ${
+                bouncingLikeId === currentPhoto.id ? 'scale-110' : 'active:scale-95'
+              }`}
+            >
+              <Heart
+                className={`w-6 h-6 ${
+                  myLikedPhotoIds.includes(currentPhoto.id)
+                    ? 'fill-pink-500 text-pink-500'
+                    : 'text-zinc-200'
+                }`}
+              />
+              <span className="font-bold text-sm text-white">{currentPhoto.likes_count}</span>
+            </button>
+
+            {/* 端末保存ボタン */}
+            <button
+              onClick={() => handleDownload(currentPhoto)}
+              className="flex items-center space-x-1.5 px-5 py-2.5 bg-white/20 hover:bg-white/30 active:scale-95 backdrop-blur-md text-white rounded-2xl text-xs font-bold transition"
+            >
+              <Download className="w-4 h-4" />
+              <span>{savedPhotoIds.includes(currentPhoto.id) ? '保存済み' : '高画質保存'}</span>
+            </button>
+
+            {/* ホスト専用モデレーション操作 */}
+            {isHostMode && (
+              <div className="flex items-center space-x-2 pl-2 border-l border-white/20">
+                <button
+                  onClick={() => handleTogglePickup(currentPhoto)}
+                  className={`p-2.5 rounded-2xl backdrop-blur-md transition ${
+                    currentPhoto.is_pickup
+                      ? 'bg-amber-400 text-zinc-950 font-bold'
+                      : 'bg-white/15 text-white'
+                  }`}
+                  title="Pickup"
+                >
+                  <Star className="w-4 h-4" />
+                </button>
+
+                <button
+                  onClick={() => handleToggleHide(currentPhoto)}
+                  className={`p-2.5 rounded-2xl backdrop-blur-md transition ${
+                    currentPhoto.is_hidden
+                      ? 'bg-red-500 text-white'
+                      : 'bg-white/15 text-white'
+                  }`}
+                  title={currentPhoto.is_hidden ? '非表示解除' : 'プロジェクター非表示'}
+                >
+                  <EyeOff className="w-4 h-4" />
+                </button>
+
+                <button
+                  onClick={() => handleDeletePhoto(currentPhoto)}
+                  className="p-2.5 rounded-2xl bg-red-600/80 backdrop-blur-md text-white active:scale-95 transition"
+                  title="削除"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
 
+      {/* 隠しインプット */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -829,43 +952,49 @@ export default function EventPhotoGalleryPage() {
         className="hidden"
       />
 
-      {/* FAB */}
+      {/* FAB（写真追加） */}
       <button
         disabled={isUploading}
         onClick={() => setIsActionSheetOpen(true)}
-        className={`fixed bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] right-4 sm:right-[max(1rem,calc(50%-224px+1rem))] z-40 w-14 h-14 rounded-full bg-white shadow-xl flex items-center justify-center border border-zinc-100 active:scale-90 transition-transform ${
-          isUploading ? 'opacity-70' : ''
+        className={`fixed bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] right-4 sm:right-[max(1rem,calc(50%-224px+1rem))] z-40 h-14 px-5 rounded-full bg-zinc-900 text-white shadow-2xl flex items-center justify-center space-x-2 border border-zinc-700 active:scale-95 transition-transform ${
+          isUploading ? 'opacity-90' : ''
         }`}
         aria-label="写真を追加"
       >
         {isUploading ? (
-          <Loader2 className="w-6 h-6 text-zinc-900 animate-spin" />
+          <>
+            <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+            <span className="text-xs font-bold">{uploadProgressText}</span>
+          </>
         ) : (
-          <Camera className="w-7 h-7 text-zinc-900" strokeWidth={1.5} />
+          <>
+            <Camera className="w-6 h-6 text-amber-400" strokeWidth={1.8} />
+            <span className="text-xs font-bold tracking-wide">投稿する</span>
+          </>
         )}
       </button>
 
-      {/* 写真追加アクションシート */}
+      {/* 写真追加シート */}
       {isActionSheetOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end items-center bg-black/50">
+        <div className="fixed inset-0 z-50 flex flex-col justify-end items-center bg-black/50 backdrop-blur-[2px]">
           <div className="absolute inset-0" onClick={() => setIsActionSheetOpen(false)} />
           <div className="relative w-full max-w-md bg-white rounded-t-3xl p-6 shadow-2xl z-10 space-y-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] animate-in slide-in-from-bottom duration-150">
             <div className="w-10 h-1 bg-zinc-300 rounded-full mx-auto mb-2" />
-            <h3 className="text-center font-bold text-zinc-800 text-sm mb-4">写真を追加する</h3>
+            <h3 className="text-center font-bold text-zinc-800 text-sm mb-4">想い出をシェアする</h3>
 
             <button
               onClick={() => cameraInputRef.current?.click()}
-              className="w-full py-3.5 px-4 bg-zinc-900 text-white rounded-2xl font-medium flex items-center justify-center space-x-2 active:scale-98 transition shadow"
+              className="w-full py-3.5 px-4 bg-zinc-900 text-white rounded-2xl font-bold flex items-center justify-center space-x-2 active:scale-98 transition shadow"
             >
-              <Camera className="w-5 h-5" />
-              <span>写真を撮影する</span>
+              <Camera className="w-5 h-5 text-amber-400" />
+              <span>カメラで撮影する</span>
             </button>
 
             <button
               onClick={() => albumInputRef.current?.click()}
-              className="w-full py-3.5 px-4 bg-zinc-100 text-zinc-800 rounded-2xl font-medium flex items-center justify-center space-x-2 active:scale-98 transition"
+              className="w-full py-3.5 px-4 bg-zinc-100 text-zinc-800 rounded-2xl font-bold flex items-center justify-center space-x-2 active:scale-98 transition"
             >
-              <Camera className="w-5 h-5 text-zinc-600" />
+              <Sparkles className="w-5 h-5 text-indigo-500" />
               <span>アルバムから選択</span>
             </button>
 
@@ -879,7 +1008,7 @@ export default function EventPhotoGalleryPage() {
         </div>
       )}
 
-      {/* 初回お名前入力モーダル */}
+      {/* お名前入力モーダル */}
       {isNameModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl space-y-4">
@@ -887,9 +1016,9 @@ export default function EventPhotoGalleryPage() {
               <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2">
                 <UserCheck className="w-6 h-6" />
               </div>
-              <h3 className="font-bold text-zinc-800 text-base">お名前の入力</h3>
+              <h3 className="font-bold text-zinc-800 text-base">お名前の登録</h3>
               <p className="text-xs text-zinc-400 mt-1">
-                新郎新婦や司会者に伝わるニックネームやお名前を入力してください
+                新郎新婦へ伝わるお名前やニックネームをご入力ください
               </p>
             </div>
 
@@ -899,7 +1028,7 @@ export default function EventPhotoGalleryPage() {
                 maxLength={20}
                 value={tempNameInput}
                 onChange={(e) => setTempNameInput(e.target.value)}
-                placeholder="例: たなか / 新郎友人 鈴木"
+                placeholder="例: 山田 / 新婦友人 あやか"
                 className="w-full text-center text-base font-bold py-3 bg-zinc-100 rounded-2xl border-none focus:ring-2 focus:ring-zinc-800"
                 autoFocus
                 required
@@ -935,10 +1064,10 @@ export default function EventPhotoGalleryPage() {
             className="absolute inset-0 bg-black/40 transition-opacity"
             onClick={() => setIsDrawerOpen(false)}
           />
-          <aside className="relative w-[75%] max-w-[300px] h-full bg-white shadow-2xl p-6 flex flex-col justify-between z-10">
+          <aside className="relative w-[80%] max-w-[320px] h-full bg-white shadow-2xl p-6 flex flex-col justify-between z-10 overflow-y-auto">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-zinc-100">
-                <h2 className="font-serif italic font-bold text-zinc-800 text-lg">Menu</h2>
+                <h2 className="font-serif italic font-bold text-zinc-800 text-xl">Menu</h2>
                 <button
                   onClick={() => setIsDrawerOpen(false)}
                   className="p-1 text-zinc-500 hover:text-zinc-800"
@@ -947,9 +1076,10 @@ export default function EventPhotoGalleryPage() {
                 </button>
               </div>
 
-              <div className="mt-4 p-3 bg-zinc-50 rounded-2xl flex items-center justify-between">
+              {/* ユーザー名カード */}
+              <div className="mt-4 p-3 bg-zinc-50 rounded-2xl flex items-center justify-between border border-zinc-100">
                 <div>
-                  <p className="text-[10px] text-zinc-400 font-bold uppercase">Your Name</p>
+                  <p className="text-[10px] text-zinc-400 font-bold uppercase">Guest Name</p>
                   <p className="text-sm font-bold text-zinc-800">{userName || '未設定（ゲスト）'}</p>
                 </div>
                 <button
@@ -985,15 +1115,45 @@ export default function EventPhotoGalleryPage() {
                   <span>プロジェクター投影画面</span>
                 </a>
 
+                {/* ホスト専用メニュー群 */}
                 {isHostMode && (
-                  <button
-                    disabled={isZipping}
-                    onClick={handleDownloadAllZip}
-                    className="flex items-center space-x-3 text-amber-600 w-full py-2.5 px-2 text-left font-medium active:bg-amber-50 rounded-xl"
-                  >
-                    <Archive className="w-5 h-5" />
-                    <span>{isZipping ? `ZIP作成中 (${zipProgress}%)` : '全写真一括ダウンロード'}</span>
-                  </button>
+                  <>
+                    <div className="pt-2 pb-1 border-t border-zinc-100">
+                      <p className="text-[10px] text-amber-600 font-bold uppercase tracking-wider px-2">
+                        Host Admin Controls
+                      </p>
+                    </div>
+
+                    {/* いいね投票締め切りトグル */}
+                    <button
+                      onClick={handleToggleLock}
+                      className={`flex items-center space-x-3 w-full py-2.5 px-2 text-left font-bold rounded-xl ${
+                        eventData.is_locked ? 'bg-amber-100 text-amber-900' : 'text-zinc-700 hover:bg-zinc-50'
+                      }`}
+                    >
+                      <Lock className="w-5 h-5 text-amber-600" />
+                      <span>{eventData.is_locked ? '投票ロック中（解除）' : 'いいね投票を締め切る'}</span>
+                    </button>
+
+                    {/* 卓上配布カード画像生成 */}
+                    <button
+                      onClick={handleGenerateQrCard}
+                      className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl"
+                    >
+                      <Printer className="w-5 h-5 text-zinc-600" />
+                      <span>卓上案内カードを保存</span>
+                    </button>
+
+                    {/* 一括ZIPダウンロード */}
+                    <button
+                      disabled={isZipping}
+                      onClick={handleDownloadAllZip}
+                      className="flex items-center space-x-3 text-amber-600 w-full py-2.5 px-2 text-left font-bold active:bg-amber-50 rounded-xl"
+                    >
+                      <Archive className="w-5 h-5" />
+                      <span>{isZipping ? `ZIP作成中 (${zipProgress}%)` : '全写真一括ダウンロード'}</span>
+                    </button>
+                  </>
                 )}
 
                 <button
@@ -1005,7 +1165,7 @@ export default function EventPhotoGalleryPage() {
                       setIsPinModalOpen(true);
                     }
                   }}
-                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl"
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-2 text-left font-medium active:bg-zinc-50 rounded-xl pt-2 border-t border-zinc-100"
                 >
                   {isHostMode ? (
                     <>
@@ -1015,21 +1175,22 @@ export default function EventPhotoGalleryPage() {
                   ) : (
                     <>
                       <Lock className="w-5 h-5 text-zinc-500" />
-                      <span>ホスト管理設定</span>
+                      <span>ホスト管理者ログイン</span>
                     </>
                   )}
                 </button>
               </nav>
             </div>
 
-            <div className="text-xs text-zinc-400 space-y-1">
+            <div className="text-xs text-zinc-400 space-y-1 pt-6">
               <p>Guest ID: {userId.slice(0, 8)}...</p>
-              <p>Wedding Snap v1.0.0</p>
+              <p>Wedding Snap Pro v1.2</p>
             </div>
           </aside>
         </div>
       )}
 
+      {/* ホストPIN認証モーダル */}
       {isPinModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl space-y-4">
@@ -1072,6 +1233,7 @@ export default function EventPhotoGalleryPage() {
         </div>
       )}
 
+      {/* QRコードモーダル */}
       {isQrModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl text-center space-y-4">
