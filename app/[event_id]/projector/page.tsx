@@ -10,6 +10,10 @@ import {
   QrCode,
   Maximize2,
   Minimize2,
+  Award,
+  Crown,
+  Play,
+  X,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -35,6 +39,7 @@ interface Photo {
   thumb_url?: string;
   original_url?: string;
   user_id: string;
+  user_name?: string;
   likes_count: number;
   is_pickup: boolean;
   created_at: string;
@@ -57,14 +62,16 @@ export default function ProjectorLivePage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [guestUrl, setGuestUrl] = useState('');
 
+  // 👑 ランキング発表モード（表彰式・余興演出用）
+  const [isCeremonyOpen, setIsCeremonyOpen] = useState(false);
+  const [ceremonyStep, setCeremonyStep] = useState<3 | 2 | 1>(3);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const url = `${window.location.origin}/${eventId}`;
-      setGuestUrl(url);
+      setGuestUrl(`${window.location.origin}/${eventId}`);
     }
   }, [eventId]);
 
-  // 1. 初期データ取得 ＆ Realtime購読
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
@@ -86,25 +93,22 @@ export default function ProjectorLivePage() {
     fetchPhotos();
 
     const channel = supabase
-      .channel(`realtime:projector:${eventId}`)
+      .channel(`rt_projector_${eventId}`)
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'photos',
-          filter: `event_id=eq.${eventId}`,
-        },
+        { event: '*', schema: 'public', table: 'photos' },
         (payload) => {
+          const newPhoto = payload.new as Photo;
           if (payload.eventType === 'INSERT') {
-            const newPhoto = payload.new as Photo;
-            setPhotos((prev) => [newPhoto, ...prev]);
-            // 新着写真ポップアップ演出（5秒間）
-            setNewPostAlert(newPhoto);
-            setTimeout(() => setNewPostAlert(null), 5000);
+            if (newPhoto.event_id === eventId) {
+              setPhotos((prev) => [newPhoto, ...prev]);
+              setNewPostAlert(newPhoto);
+              setTimeout(() => setNewPostAlert(null), 5000);
+            }
           } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as Photo;
-            setPhotos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+            if (newPhoto.event_id === eventId) {
+              setPhotos((prev) => prev.map((p) => (p.id === newPhoto.id ? newPhoto : p)));
+            }
           } else if (payload.eventType === 'DELETE') {
             setPhotos((prev) => prev.filter((p) => p.id !== payload.old.id));
           }
@@ -117,7 +121,6 @@ export default function ProjectorLivePage() {
     };
   }, [eventId]);
 
-  // 2. メインスライドショー（5秒ごとに自動切替）
   const slideshowPhotos = useMemo(() => {
     if (photos.length === 0) return [];
     const pickups = photos.filter((p) => p.is_pickup);
@@ -128,21 +131,18 @@ export default function ProjectorLivePage() {
     if (slideshowPhotos.length <= 1) return;
     const timer = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % slideshowPhotos.length);
-    }, 5000);
+    }, 5500);
     return () => clearInterval(timer);
   }, [slideshowPhotos.length]);
 
-  // 3. ランキングTOP 3
   const rankingPhotos = useMemo(() => {
     return [...photos].sort((a, b) => b.likes_count - a.likes_count).slice(0, 3);
   }, [photos]);
 
-  // 4. 最新投稿フィード（直近4枚）
   const latestPhotos = useMemo(() => {
     return photos.slice(0, 4);
   }, [photos]);
 
-  // 全画面切り替え
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
@@ -154,10 +154,11 @@ export default function ProjectorLivePage() {
   };
 
   const currentSlide = slideshowPhotos[currentIndex] || photos[0];
+  const ceremonyTargetPhoto = rankingPhotos[ceremonyStep - 1];
 
   return (
     <div className="w-screen h-screen bg-zinc-950 text-white flex flex-col overflow-hidden select-none font-sans">
-      {/* 上部ヘッダーバー */}
+      {/* 上部バー */}
       <header className="h-16 px-8 bg-zinc-900/80 backdrop-blur-md border-b border-zinc-800 flex items-center justify-between z-20 shrink-0">
         <div className="flex items-center space-x-3">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -170,9 +171,22 @@ export default function ProjectorLivePage() {
         </div>
 
         <div className="flex items-center space-x-4">
+          {/* 表彰式・余興用ランキング発表ボタン */}
+          <button
+            onClick={() => {
+              setCeremonyStep(3);
+              setIsCeremonyOpen(true);
+            }}
+            className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-black rounded-xl text-xs flex items-center space-x-2 shadow-lg active:scale-95 transition"
+          >
+            <Trophy className="w-4 h-4" />
+            <span>🏆 ランキング発表モード</span>
+          </button>
+
           <span className="text-sm text-zinc-400">
             投稿枚数: <strong className="text-white text-base">{photos.length}</strong> 枚
           </span>
+
           <button
             onClick={toggleFullscreen}
             className="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition text-zinc-300"
@@ -183,37 +197,38 @@ export default function ProjectorLivePage() {
         </div>
       </header>
 
-      {/* メイングリッド（16:9比率に最適化） */}
+      {/* メイン画面 */}
       <div className="flex-1 grid grid-cols-12 gap-6 p-6 overflow-hidden">
-        {/* 左側: メインスライドショー ＆ 新着ポップアップ（8カラム） */}
-        <div className="col-span-8 h-full relative rounded-3xl overflow-hidden bg-zinc-900 border border-zinc-800/80 shadow-2xl flex items-center justify-center">
+        {/* 左側: スライドショー */}
+        <div className="col-span-8 h-full relative rounded-3xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-2xl flex items-center justify-center">
           {currentSlide ? (
             <div className="relative w-full h-full flex items-center justify-center p-4">
-              {/* 背景ブラー */}
               <div
                 className="absolute inset-0 bg-cover bg-center filter blur-3xl opacity-30 scale-110 transition-all duration-1000"
                 style={{ backgroundImage: `url(${currentSlide.public_url})` }}
               />
 
-              {/* メイン写真 */}
               <img
                 key={currentSlide.id}
                 src={currentSlide.original_url || currentSlide.public_url}
                 alt="Slideshow"
-                className="relative z-10 max-h-full max-w-full object-contain rounded-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-700"
+                className="relative z-10 max-h-full max-w-full object-contain rounded-2xl shadow-2xl animate-in fade-in duration-700"
               />
 
-              {/* 写真情報バッジ */}
-              <div className="absolute bottom-8 left-8 z-20 flex items-center space-x-3 bg-black/60 backdrop-blur-md px-5 py-2.5 rounded-2xl border border-white/10">
+              <div className="absolute bottom-8 left-8 z-20 flex items-center space-x-3 bg-black/70 backdrop-blur-md px-5 py-2.5 rounded-2xl border border-white/10">
                 {currentSlide.is_pickup && (
                   <span className="flex items-center space-x-1 text-amber-400 text-sm font-bold">
                     <Sparkles className="w-4 h-4" />
                     <span>新郎新婦 Pickup</span>
                   </span>
                 )}
-                <div className="flex items-center space-x-1.5 text-pink-400 text-sm font-bold">
+                {/* 投稿者名 */}
+                <span className="text-sm text-zinc-200 font-medium">
+                  📸 <strong>{currentSlide.user_name || 'ゲスト'}</strong>
+                </span>
+                <div className="flex items-center space-x-1.5 text-pink-400 text-sm font-bold pl-2 border-l border-white/20">
                   <Heart className="w-4 h-4 fill-pink-500" />
-                  <span>{currentSlide.likes_count} Likes</span>
+                  <span>{currentSlide.likes_count}</span>
                 </div>
               </div>
             </div>
@@ -224,12 +239,12 @@ export default function ProjectorLivePage() {
             </div>
           )}
 
-          {/* 新着投稿ポップアップオーバーレイ */}
+          {/* 新着投稿ポップアップ */}
           {newPostAlert && (
-            <div className="absolute inset-0 z-30 bg-black/80 backdrop-blur-lg flex flex-col items-center justify-center p-6 animate-in zoom-in-90 fade-in duration-300">
-              <div className="bg-gradient-to-r from-amber-500 to-rose-500 text-zinc-950 font-black text-sm px-4 py-1 rounded-full mb-3 shadow-lg flex items-center space-x-1.5">
+            <div className="absolute inset-0 z-30 bg-black/85 backdrop-blur-lg flex flex-col items-center justify-center p-6 animate-in zoom-in-90 fade-in duration-300">
+              <div className="bg-gradient-to-r from-amber-500 to-rose-500 text-zinc-950 font-black text-sm px-5 py-1.5 rounded-full mb-3 shadow-xl flex items-center space-x-2">
                 <Sparkles className="w-4 h-4" />
-                <span>NEW PHOTO POSTED!</span>
+                <span>NEW PHOTO BY {newPostAlert.user_name || 'ゲスト'}！</span>
               </div>
               <div className="max-h-[70%] max-w-[80%] rounded-2xl overflow-hidden border-2 border-white/30 shadow-2xl bg-black">
                 <img
@@ -242,21 +257,17 @@ export default function ProjectorLivePage() {
           )}
         </div>
 
-        {/* 右側: ライブ情報サイドパネル（4カラム） */}
+        {/* 右側サイドパネル */}
         <div className="col-span-4 h-full flex flex-col space-y-4 overflow-hidden">
-          {/* 1. 会場参加用QRコード（常時表示） */}
-          <div className="bg-zinc-900/90 border border-zinc-800 rounded-3xl p-4 flex items-center space-x-4 shadow-xl shrink-0">
+          {/* QRコード */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-4 flex items-center space-x-4 shadow-xl shrink-0">
             <div className="p-2 bg-white rounded-2xl shrink-0">
-              {guestUrl ? (
+              {guestUrl && (
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                    guestUrl
-                  )}`}
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(guestUrl)}`}
                   alt="QR"
                   className="w-20 h-20 rounded"
                 />
-              ) : (
-                <div className="w-20 h-20 bg-zinc-200" />
               )}
             </div>
             <div>
@@ -264,15 +275,15 @@ export default function ProjectorLivePage() {
                 <QrCode className="w-3.5 h-3.5" />
                 <span>Join & Share</span>
               </span>
-              <h3 className="font-bold text-sm text-zinc-100">スマホで簡単写真共有</h3>
+              <h3 className="font-bold text-sm text-zinc-100">スマホで写真共有</h3>
               <p className="text-[11px] text-zinc-400 mt-1">
-                QRコードを読み取って写真を投稿＆いいね！
+                QRコードから写真をアップロード＆いいね！
               </p>
             </div>
           </div>
 
-          {/* 2. いいねランキング TOP 3 */}
-          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-3xl p-4 flex-1 flex flex-col justify-between overflow-hidden shadow-xl">
+          {/* ランキングTOP 3 */}
+          <div className="bg-zinc-900/80 border border-zinc-800 rounded-3xl p-4 flex-1 flex flex-col justify-between overflow-hidden shadow-xl">
             <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs pb-2 border-b border-zinc-800">
               <Trophy className="w-4 h-4" />
               <span>POPULAR RANKING TOP 3</span>
@@ -280,13 +291,12 @@ export default function ProjectorLivePage() {
 
             <div className="grid grid-cols-3 gap-2.5 py-2 my-auto">
               {rankingPhotos.map((photo, rank) => (
-                <div key={photo.id} className="relative aspect-square rounded-2xl overflow-hidden bg-zinc-800 border border-zinc-700/50 group">
+                <div key={photo.id} className="relative aspect-square rounded-2xl overflow-hidden bg-zinc-800 border border-zinc-700">
                   <img
                     src={photo.thumb_url || photo.public_url}
                     alt={`Rank ${rank + 1}`}
                     className="w-full h-full object-cover"
                   />
-                  {/* 順位クラウンバッジ */}
                   <div
                     className={`absolute top-1.5 left-1.5 w-6 h-6 rounded-full text-xs font-black flex items-center justify-center shadow-lg ${
                       rank === 0
@@ -298,10 +308,13 @@ export default function ProjectorLivePage() {
                   >
                     {rank + 1}
                   </div>
-                  {/* いいね数 */}
-                  <div className="absolute bottom-1 right-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded-md text-[10px] font-bold text-pink-400 flex items-center space-x-0.5">
-                    <Heart className="w-2.5 h-2.5 fill-pink-500" />
-                    <span>{photo.likes_count}</span>
+                  {/* 投稿者名 ＆ いいね */}
+                  <div className="absolute bottom-1 inset-x-1 bg-black/75 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center justify-between text-zinc-200">
+                    <span className="truncate max-w-[60%]">{photo.user_name || 'ゲスト'}</span>
+                    <span className="text-pink-400 flex items-center space-x-0.5">
+                      <Heart className="w-2.5 h-2.5 fill-pink-500 inline" />
+                      <span>{photo.likes_count}</span>
+                    </span>
                   </div>
                 </div>
               ))}
@@ -313,8 +326,8 @@ export default function ProjectorLivePage() {
             </div>
           </div>
 
-          {/* 3. 最新投稿フィード */}
-          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-3xl p-4 flex-1 flex flex-col justify-between overflow-hidden shadow-xl">
+          {/* 最新投稿 */}
+          <div className="bg-zinc-900/80 border border-zinc-800 rounded-3xl p-4 flex-1 flex flex-col justify-between overflow-hidden shadow-xl">
             <div className="flex items-center space-x-2 text-indigo-400 font-bold text-xs pb-2 border-b border-zinc-800">
               <Clock className="w-4 h-4" />
               <span>RECENT POSTS</span>
@@ -322,17 +335,15 @@ export default function ProjectorLivePage() {
 
             <div className="grid grid-cols-4 gap-2 py-2 my-auto">
               {latestPhotos.map((photo) => (
-                <div key={photo.id} className="relative aspect-square rounded-xl overflow-hidden bg-zinc-800 border border-zinc-700/50">
+                <div key={photo.id} className="relative aspect-square rounded-xl overflow-hidden bg-zinc-800 border border-zinc-700">
                   <img
                     src={photo.thumb_url || photo.public_url}
                     alt="Latest"
                     className="w-full h-full object-cover"
                   />
-                  {photo.is_pickup && (
-                    <div className="absolute top-1 left-1">
-                      <Sparkles className="w-3 h-3 text-amber-400 fill-amber-400" />
-                    </div>
-                  )}
+                  <div className="absolute bottom-0 inset-x-0 bg-black/70 text-[8px] text-center truncate py-0.5 px-1 text-zinc-300">
+                    {photo.user_name || 'ゲスト'}
+                  </div>
                 </div>
               ))}
               {[...Array(Math.max(0, 4 - latestPhotos.length))].map((_, i) => (
@@ -344,6 +355,94 @@ export default function ProjectorLivePage() {
           </div>
         </div>
       </div>
+
+      {/* 👑 表彰式・余興用ランキング発表全画面モーダル */}
+      {isCeremonyOpen && (
+        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-between p-8 animate-in fade-in duration-300">
+          <div className="w-full flex justify-between items-center">
+            <div className="flex items-center space-x-2 text-amber-400 font-black text-xl tracking-widest uppercase">
+              <Crown className="w-7 h-7" />
+              <span>BEST PHOTO AWARDS</span>
+            </div>
+            <button
+              onClick={() => setIsCeremonyOpen(false)}
+              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+
+          {/* 発表写真本体 */}
+          <div className="relative flex-1 w-full max-w-4xl flex flex-col items-center justify-center my-4">
+            {ceremonyTargetPhoto ? (
+              <div className="relative flex flex-col items-center animate-in zoom-in-75 duration-500">
+                {/* 順位バッジ */}
+                <div
+                  className={`text-2xl font-black px-8 py-2 rounded-full mb-4 shadow-2xl flex items-center space-x-2 tracking-widest ${
+                    ceremonyStep === 1
+                      ? 'bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 text-zinc-950 ring-4 ring-amber-300 shadow-amber-500/50'
+                      : ceremonyStep === 2
+                      ? 'bg-zinc-300 text-zinc-950'
+                      : 'bg-amber-800 text-amber-100'
+                  }`}
+                >
+                  <Award className="w-6 h-6" />
+                  <span>{ceremonyStep === 1 ? '第 1 位 （グランプリ）' : `第 ${ceremonyStep} 位`}</span>
+                </div>
+
+                {/* 写真 */}
+                <div className="max-h-[50vh] rounded-3xl overflow-hidden border-4 border-amber-400/80 shadow-2xl bg-black">
+                  <img
+                    src={ceremonyTargetPhoto.original_url || ceremonyTargetPhoto.public_url}
+                    alt="Award winner"
+                    className="max-h-[50vh] w-auto object-contain"
+                  />
+                </div>
+
+                {/* 投稿者名 ＆ 獲得いいね */}
+                <div className="mt-4 text-center space-y-1">
+                  <h3 className="text-3xl font-black text-white tracking-wider">
+                    撮影者: <span className="text-amber-400 underline">{ceremonyTargetPhoto.user_name || 'ゲスト'}</span> 様
+                  </h3>
+                  <p className="text-pink-400 font-bold text-lg">
+                    獲得いいね: {ceremonyTargetPhoto.likes_count} 票
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="text-zinc-500 text-xl font-bold">まだ該当順位の写真がありません</div>
+            )}
+          </div>
+
+          {/* 下部コントローラー */}
+          <div className="flex items-center space-x-4 bg-zinc-900 px-6 py-3 rounded-2xl border border-zinc-800">
+            <button
+              onClick={() => setCeremonyStep(3)}
+              className={`px-5 py-2.5 rounded-xl font-bold text-sm transition ${
+                ceremonyStep === 3 ? 'bg-amber-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+              }`}
+            >
+              第3位を発表
+            </button>
+            <button
+              onClick={() => setCeremonyStep(2)}
+              className={`px-5 py-2.5 rounded-xl font-bold text-sm transition ${
+                ceremonyStep === 2 ? 'bg-zinc-200 text-zinc-950' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+              }`}
+            >
+              第2位を発表
+            </button>
+            <button
+              onClick={() => setCeremonyStep(1)}
+              className={`px-6 py-2.5 rounded-xl font-black text-base shadow-lg transition ${
+                ceremonyStep === 1 ? 'bg-amber-400 text-zinc-950 ring-2 ring-amber-300' : 'bg-zinc-800 text-amber-400 hover:bg-zinc-700'
+              }`}
+            >
+              👑 堂々の第1位を発表！
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
