@@ -54,199 +54,60 @@ interface EventData {
   title: string;
 }
 
-class RichSoundEngine {
-  private ctx: AudioContext | null = null;
-
-  private init() {
-    if (!this.ctx && typeof window !== 'undefined') {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      this.ctx = new AudioCtx();
+// 安定したWeb Audio音響エンジン
+const playAudioEffect = (type: 'drumroll' | 'fanfare') => {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') {
+      ctx.resume();
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
-  }
+    const now = ctx.currentTime;
 
-  private createReverb(targetGain = 0.35) {
-    if (!this.ctx) return null;
-    const delay = this.ctx.createDelay();
-    delay.delayTime.value = 0.06;
-
-    const feedback = this.ctx.createGain();
-    feedback.gain.value = 0.45;
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 3200;
-
-    const wet = this.ctx.createGain();
-    wet.gain.value = targetGain;
-
-    delay.connect(feedback);
-    feedback.connect(filter);
-    filter.connect(delay);
-    delay.connect(wet);
-    wet.connect(this.ctx.destination);
-
-    return delay;
-  }
-
-  playDrumroll(duration = 2.2) {
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime;
-    const steps = 38;
-    const stepDuration = duration / steps;
-
-    for (let i = 0; i < steps; i++) {
-      const t = now + i * stepDuration;
-      const progress = i / steps;
-      const volume = 0.05 + Math.pow(progress, 2) * 0.45;
-
-      const bufferSize = this.ctx.sampleRate * 0.04;
-      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let j = 0; j < bufferSize; j++) {
-        data[j] = Math.random() * 2 - 1;
+    if (type === 'drumroll') {
+      const steps = 30;
+      const duration = 1.8;
+      const stepTime = duration / steps;
+      for (let i = 0; i < steps; i++) {
+        const t = now + i * stepTime;
+        const progress = i / steps;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(110 + Math.random() * 30, t);
+        gain.gain.setValueAtTime(0.05 + progress * 0.35, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.05);
       }
-
-      const noise = this.ctx.createBufferSource();
-      noise.buffer = buffer;
-
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'highpass';
-      filter.frequency.value = 1200;
-
-      const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(volume, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
-
-      noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.ctx.destination);
-      noise.start(t);
-
-      const tone = this.ctx.createOscillator();
-      const toneGain = this.ctx.createGain();
-      tone.type = 'sine';
-      tone.frequency.setValueAtTime(140 + Math.random() * 20, t);
-      toneGain.gain.setValueAtTime(volume * 0.4, t);
-      toneGain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
-
-      tone.connect(toneGain);
-      toneGain.connect(this.ctx.destination);
-      tone.start(t);
-      tone.stop(t + 0.04);
+    } else if (type === 'fanfare') {
+      const notes = [
+        { f: 523.25, t: 0.0, d: 0.12 },
+        { f: 659.25, t: 0.14, d: 0.12 },
+        { f: 783.99, t: 0.28, d: 0.14 },
+        { f: 1046.5, t: 0.44, d: 1.8 },
+      ];
+      notes.forEach((n) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(n.f, now + n.t);
+        gain.gain.setValueAtTime(0.001, now + n.t);
+        gain.gain.linearRampToValueAtTime(0.25, now + n.t + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + n.t + n.d);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + n.t);
+        osc.stop(now + n.t + n.d + 0.05);
+      });
     }
+  } catch (err) {
+    console.error('Audio play error:', err);
   }
-
-  private playBrassNote(freq: number, startTime: number, dur: number, maxVol = 0.25, reverbNode: any) {
-    if (!this.ctx) return;
-
-    [-4, 4].forEach((detune) => {
-      const osc = this.ctx!.createOscillator();
-      const gain = this.ctx!.createGain();
-      const filter = this.ctx!.createBiquadFilter();
-
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(freq, startTime);
-      osc.detune.setValueAtTime(detune, startTime);
-
-      filter.type = 'lowpass';
-      filter.Q.value = 2.5;
-      filter.frequency.setValueAtTime(600, startTime);
-      filter.frequency.exponentialRampToValueAtTime(4500, startTime + 0.08);
-      filter.frequency.exponentialRampToValueAtTime(2200, startTime + dur);
-
-      gain.gain.setValueAtTime(0.001, startTime);
-      gain.gain.linearRampToValueAtTime(maxVol, startTime + 0.05);
-      gain.gain.setValueAtTime(maxVol * 0.85, startTime + dur - 0.15);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur + 0.1);
-
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.ctx!.destination);
-      if (reverbNode) gain.connect(reverbNode);
-
-      osc.start(startTime);
-      osc.stop(startTime + dur + 0.15);
-    });
-  }
-
-  private playCymbal(startTime: number, reverbNode: any) {
-    if (!this.ctx) return;
-    const dur = 2.5;
-    const bufferSize = this.ctx.sampleRate * dur;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
-
-    const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 6500;
-    filter.Q.value = 1.2;
-
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.4, startTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + dur);
-
-    noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.ctx.destination);
-    if (reverbNode) gain.connect(reverbNode);
-
-    noise.start(startTime);
-  }
-
-  private playTimpani(startTime: number) {
-    if (!this.ctx) return;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(95, startTime);
-    osc.frequency.exponentialRampToValueAtTime(45, startTime + 0.4);
-
-    gain.gain.setValueAtTime(0.6, startTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.6);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(startTime);
-    osc.stop(startTime + 0.65);
-  }
-
-  playFanfare() {
-    this.init();
-    if (!this.ctx) return;
-
-    const now = this.ctx.currentTime + 0.05;
-    const reverb = this.createReverb(0.4);
-
-    this.playBrassNote(523.25, now, 0.12, 0.25, reverb);
-    this.playBrassNote(659.25, now + 0.14, 0.12, 0.25, reverb);
-    this.playBrassNote(783.99, now + 0.28, 0.14, 0.28, reverb);
-
-    const chordTime = now + 0.44;
-    const chordDuration = 2.4;
-
-    [261.63, 392.0, 523.25, 659.25, 783.99, 1046.5].forEach((freq) => {
-      this.playBrassNote(freq, chordTime, chordDuration, 0.2, reverb);
-    });
-
-    this.playCymbal(chordTime, reverb);
-    this.playTimpani(chordTime);
-  }
-}
-
-const sounds = new RichSoundEngine();
+};
 
 export default function ProjectorLivePage() {
   const params = useParams();
@@ -379,12 +240,12 @@ export default function ProjectorLivePage() {
   const handleSelectStep = (step: number) => {
     setCeremonyStep(step);
     if (isSoundEnabled) {
-      sounds.playDrumroll(1.2);
+      playAudioEffect('drumroll');
     }
     if (step === 1) {
       setTimeout(() => {
         fireConfetti();
-        if (isSoundEnabled) sounds.playFanfare();
+        if (isSoundEnabled) playAudioEffect('fanfare');
       }, 400);
     }
   };
@@ -415,6 +276,7 @@ export default function ProjectorLivePage() {
 
   return (
     <div className="w-screen h-screen bg-zinc-950 text-white flex flex-col overflow-hidden select-none font-sans">
+      {/* 上部ヘッダー */}
       <header className="h-16 px-8 bg-zinc-900/80 backdrop-blur-md border-b border-zinc-800 flex items-center justify-between z-20 shrink-0">
         <div className="flex items-center space-x-3">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -431,7 +293,7 @@ export default function ProjectorLivePage() {
             onClick={() => {
               setCeremonyStep(3);
               setIsCeremonyOpen(true);
-              if (isSoundEnabled) sounds.playDrumroll(1.2);
+              if (isSoundEnabled) playAudioEffect('drumroll');
             }}
             className="px-5 py-2.5 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-zinc-950 font-black rounded-xl text-sm flex items-center space-x-2 shadow-xl shadow-amber-500/20 active:scale-95 transition"
           >
@@ -463,7 +325,9 @@ export default function ProjectorLivePage() {
         </div>
       </header>
 
+      {/* メイン画面 */}
       <div className="flex-1 grid grid-cols-12 gap-6 p-6 overflow-hidden">
+        {/* 左側: スライドショー */}
         <div className="col-span-8 h-full relative rounded-3xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-2xl flex items-center justify-center">
           {currentSlide ? (
             <div className="relative w-full h-full flex items-center justify-center p-4">
@@ -519,7 +383,9 @@ export default function ProjectorLivePage() {
           )}
         </div>
 
+        {/* 右側サイドパネル */}
         <div className="col-span-4 h-full flex flex-col space-y-4 overflow-hidden">
+          {/* QRコード */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-4 flex items-center space-x-4 shadow-xl shrink-0">
             <div className="p-2 bg-white rounded-2xl shrink-0">
               {guestUrl && (
@@ -542,6 +408,7 @@ export default function ProjectorLivePage() {
             </div>
           </div>
 
+          {/* ランキングTOP 3 */}
           <div className="bg-zinc-900/80 border border-zinc-800 rounded-3xl p-4 flex-1 flex flex-col justify-between overflow-hidden shadow-xl">
             <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs pb-2 border-b border-zinc-800">
               <Trophy className="w-4 h-4" />
@@ -584,6 +451,7 @@ export default function ProjectorLivePage() {
             </div>
           </div>
 
+          {/* 最新投稿 */}
           <div className="bg-zinc-900/80 border border-zinc-800 rounded-3xl p-4 flex-1 flex flex-col justify-between overflow-hidden shadow-xl">
             <div className="flex items-center space-x-2 text-indigo-400 font-bold text-xs pb-2 border-b border-zinc-800">
               <Clock className="w-4 h-4" />
@@ -613,6 +481,7 @@ export default function ProjectorLivePage() {
         </div>
       </div>
 
+      {/* 👑 表彰式・ランキング発表全画面モーダル */}
       {isCeremonyOpen && (
         <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-between p-8 animate-in fade-in duration-300 select-none">
           <div className="w-full flex justify-between items-center">
