@@ -1,32 +1,22 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import {
-  Menu,
-  X,
-  Heart,
-  CheckCircle2,
-  Download,
-  Camera,
   Trophy,
   Sparkles,
-  User,
-  Loader2,
-  Trash2,
-  Star,
-  Monitor,
-  Lock,
-  Unlock,
+  Clock,
+  Heart,
   QrCode,
-  Copy,
-  ChevronLeft,
+  Maximize2,
+  Minimize2,
+  Award,
+  Crown,
   ChevronRight,
-  Archive,
-  UserCheck,
-  Printer,
-  EyeOff,
-  AlertCircle,
+  ChevronLeft,
+  X,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -51,7 +41,6 @@ interface Photo {
   public_url: string;
   thumb_url?: string;
   original_url?: string;
-  is_hd_ready?: boolean;
   user_id: string;
   user_name?: string;
   likes_count: number;
@@ -63,173 +52,265 @@ interface Photo {
 interface EventData {
   id: string;
   title: string;
-  host_pin: string;
-  is_locked?: boolean;
 }
 
-type FilterType = 'ranking' | 'pickup' | 'mine' | null;
+class RichSoundEngine {
+  private ctx: AudioContext | null = null;
 
-const createThumbnailBlob = (file: File, maxDimension = 600, quality = 0.75): Promise<Blob> => {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined') return resolve(file);
-    const img = document.createElement('img');
-    img.onload = () => {
-      let width = img.width;
-      let height = img.height;
-      if (width > height) {
-        if (width > maxDimension) {
-          height = Math.round((height * maxDimension) / width);
-          width = maxDimension;
-        }
-      } else {
-        if (height > maxDimension) {
-          width = Math.round((width * maxDimension) / height);
-          height = maxDimension;
-        }
+  private init() {
+    if (!this.ctx && typeof window !== 'undefined') {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      this.ctx = new AudioCtx();
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+
+  private createReverb(targetGain = 0.35) {
+    if (!this.ctx) return null;
+    const delay = this.ctx.createDelay();
+    delay.delayTime.value = 0.06;
+
+    const feedback = this.ctx.createGain();
+    feedback.gain.value = 0.45;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 3200;
+
+    const wet = this.ctx.createGain();
+    wet.gain.value = targetGain;
+
+    delay.connect(feedback);
+    feedback.connect(filter);
+    filter.connect(delay);
+    delay.connect(wet);
+    wet.connect(this.ctx.destination);
+
+    return delay;
+  }
+
+  playDrumroll(duration = 2.2) {
+    this.init();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime;
+    const steps = 38;
+    const stepDuration = duration / steps;
+
+    for (let i = 0; i < steps; i++) {
+      const t = now + i * stepDuration;
+      const progress = i / steps;
+      const volume = 0.05 + Math.pow(progress, 2) * 0.45;
+
+      const bufferSize = this.ctx.sampleRate * 0.04;
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let j = 0; j < bufferSize; j++) {
+        data[j] = Math.random() * 2 - 1;
       }
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return resolve(file);
-      ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob((blob) => resolve(blob || file), 'image/jpeg', quality);
-    };
-    img.onerror = () => resolve(file);
-    img.src = URL.createObjectURL(file);
-  });
-};
 
-export default function EventPhotoGalleryPage() {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 1200;
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(volume, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+      noise.start(t);
+
+      const tone = this.ctx.createOscillator();
+      const toneGain = this.ctx.createGain();
+      tone.type = 'sine';
+      tone.frequency.setValueAtTime(140 + Math.random() * 20, t);
+      toneGain.gain.setValueAtTime(volume * 0.4, t);
+      toneGain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+
+      tone.connect(toneGain);
+      toneGain.connect(this.ctx.destination);
+      tone.start(t);
+      tone.stop(t + 0.04);
+    }
+  }
+
+  private playBrassNote(freq: number, startTime: number, dur: number, maxVol = 0.25, reverbNode: any) {
+    if (!this.ctx) return;
+
+    [-4, 4].forEach((detune) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      const filter = this.ctx!.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, startTime);
+      osc.detune.setValueAtTime(detune, startTime);
+
+      filter.type = 'lowpass';
+      filter.Q.value = 2.5;
+      filter.frequency.setValueAtTime(600, startTime);
+      filter.frequency.exponentialRampToValueAtTime(4500, startTime + 0.08);
+      filter.frequency.exponentialRampToValueAtTime(2200, startTime + dur);
+
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.linearRampToValueAtTime(maxVol, startTime + 0.05);
+      gain.gain.setValueAtTime(maxVol * 0.85, startTime + dur - 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur + 0.1);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx!.destination);
+      if (reverbNode) gain.connect(reverbNode);
+
+      osc.start(startTime);
+      osc.stop(startTime + dur + 0.15);
+    });
+  }
+
+  private playCymbal(startTime: number, reverbNode: any) {
+    if (!this.ctx) return;
+    const dur = 2.5;
+    const bufferSize = this.ctx.sampleRate * dur;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 6500;
+    filter.Q.value = 1.2;
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.4, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + dur);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    if (reverbNode) gain.connect(reverbNode);
+
+    noise.start(startTime);
+  }
+
+  private playTimpani(startTime: number) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(95, startTime);
+    osc.frequency.exponentialRampToValueAtTime(45, startTime + 0.4);
+
+    gain.gain.setValueAtTime(0.6, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.6);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(startTime);
+    osc.stop(startTime + 0.65);
+  }
+
+  playFanfare() {
+    this.init();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime + 0.05;
+    const reverb = this.createReverb(0.4);
+
+    this.playBrassNote(523.25, now, 0.12, 0.25, reverb);
+    this.playBrassNote(659.25, now + 0.14, 0.12, 0.25, reverb);
+    this.playBrassNote(783.99, now + 0.28, 0.14, 0.28, reverb);
+
+    const chordTime = now + 0.44;
+    const chordDuration = 2.4;
+
+    [261.63, 392.0, 523.25, 659.25, 783.99, 1046.5].forEach((freq) => {
+      this.playBrassNote(freq, chordTime, chordDuration, 0.2, reverb);
+    });
+
+    this.playCymbal(chordTime, reverb);
+    this.playTimpani(chordTime);
+  }
+}
+
+const sounds = new RichSoundEngine();
+
+export default function ProjectorLivePage() {
   const params = useParams();
   const rawParam = Array.isArray(params?.event_id) ? params.event_id[0] : params?.event_id;
   const eventId = (rawParam || 'demo-wedding').replace(/[^a-zA-Z0-9_-]/g, '') || 'demo-wedding';
 
-  const [eventData, setEventData] = useState<EventData>({ id: eventId, title: 'Wedding Snap', host_pin: '1234', is_locked: false });
+  const [eventData, setEventData] = useState<EventData>({ id: eventId, title: 'Wedding Snap' });
   const [photos, setPhotos] = useState<Photo[]>([]);
-  const [activeFilter, setActiveFilter] = useState<FilterType>(null);
-  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [newPostAlert, setNewPostAlert] = useState<Photo | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isSoundEnabled, setIsSoundEnabled] = useState(true);
+  const [guestUrl, setGuestUrl] = useState('');
 
-  const [userId, setUserId] = useState<string>('');
-  const [userName, setUserName] = useState<string>('');
-  const [isNameModalOpen, setIsNameModalOpen] = useState(false);
-  const [tempNameInput, setTempNameInput] = useState('');
-  const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
+  const [isCeremonyOpen, setIsCeremonyOpen] = useState(false);
+  const [ceremonyStep, setCeremonyStep] = useState<number>(3);
 
-  const [myLikedPhotoIds, setMyLikedPhotoIds] = useState<string[]>([]);
-  const [savedPhotoIds, setSavedPhotoIds] = useState<string[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgressText, setUploadProgressText] = useState('');
-  const [isZipping, setIsZipping] = useState(false);
-  const [zipProgress, setZipProgress] = useState(0);
-
-  const [bouncingLikeId, setBouncingLikeId] = useState<string | null>(null);
-
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
-  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
-  const [isHostMode, setIsHostMode] = useState(false);
-  const [pinInput, setPinInput] = useState('');
-
-  const touchStartX = useRef<number>(0);
-  const touchStartTime = useRef<number>(0);
-
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  const albumInputRef = useRef<HTMLInputElement>(null);
-
-  const fetchAllData = useCallback(async (currentUid: string) => {
-    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
-
-    const { data: eventRow } = await supabase.from('events').select('*').eq('id', eventId).single();
-    if (eventRow) setEventData(eventRow);
-
-    const { data: photosData } = await supabase
-      .from('photos')
-      .select('*')
-      .eq('event_id', eventId)
-      .order('created_at', { ascending: false });
-
-    if (photosData) setPhotos(photosData as Photo[]);
-
-    if (currentUid) {
-      const { data: likesData } = await supabase
-        .from('photo_likes')
-        .select('photo_id')
-        .eq('event_id', eventId)
-        .eq('user_id', currentUid);
-
-      if (likesData) {
-        const likedIds = likesData.map((item) => String(item.photo_id));
-        setMyLikedPhotoIds(likedIds);
-        localStorage.setItem(`likes_${eventId}`, JSON.stringify(likedIds));
-      }
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setGuestUrl(`${window.location.origin}/${eventId}`);
     }
   }, [eventId]);
 
   useEffect(() => {
-    let localUserId = localStorage.getItem('wedding_guest_uuid');
-    if (!localUserId) {
-      localUserId = crypto.randomUUID();
-      localStorage.setItem('wedding_guest_uuid', localUserId);
-    }
-    setUserId(localUserId);
-
-    const savedName = localStorage.getItem('wedding_guest_name') || '';
-    setUserName(savedName);
-
-    const cachedSaves = localStorage.getItem(`saves_${eventId}`);
-    if (cachedSaves) {
-      try {
-        setSavedPhotoIds(JSON.parse(cachedSaves));
-      } catch {
-        setSavedPhotoIds([]);
-      }
-    }
-
-    const hostSession = sessionStorage.getItem(`host_auth_${eventId}`);
-    if (hostSession === 'true') setIsHostMode(true);
-
-    fetchAllData(localUserId);
-  }, [eventId, fetchAllData]);
-
-  useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) return;
 
+    const initEvent = async () => {
+      const { data } = await supabase.from('events').select('id, title').eq('id', eventId).single();
+      if (data) setEventData(data);
+    };
+    initEvent();
+
+    const fetchPhotos = async () => {
+      const { data } = await supabase
+        .from('photos')
+        .select('*')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false });
+
+      if (data) setPhotos(data as Photo[]);
+    };
+    fetchPhotos();
+
     const channel = supabase
-      .channel(`sync_room_${eventId}`)
+      .channel(`rt_projector_${eventId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'photos' },
         (payload) => {
-          const newRow = payload.new as Photo;
-          const oldRow = payload.old as Photo;
-
+          const newPhoto = payload.new as Photo;
           if (payload.eventType === 'INSERT') {
-            if (newRow && newRow.event_id === eventId) {
-              setPhotos((prev) => {
-                const exists = prev.some((p) => p.id === newRow.id);
-                return exists ? prev : [newRow, ...prev];
-              });
+            if (newPhoto.event_id === eventId) {
+              setPhotos((prev) => [newPhoto, ...prev]);
+              if (!newPhoto.is_hidden) {
+                setNewPostAlert(newPhoto);
+                setTimeout(() => setNewPostAlert(null), 5000);
+              }
             }
           } else if (payload.eventType === 'UPDATE') {
-            if (newRow && newRow.event_id === eventId) {
-              setPhotos((prev) => prev.map((p) => (p.id === newRow.id ? { ...p, ...newRow } : p)));
+            if (newPhoto.event_id === eventId) {
+              setPhotos((prev) => prev.map((p) => (p.id === newPhoto.id ? newPhoto : p)));
             }
           } else if (payload.eventType === 'DELETE') {
-            if (oldRow && oldRow.id) {
-              setPhotos((prev) => prev.filter((p) => p.id !== oldRow.id));
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'events' },
-        (payload) => {
-          const newEvt = payload.new as EventData;
-          if (newEvt && newEvt.id === eventId) {
-            setEventData((prev) => ({ ...prev, ...newEvt }));
+            setPhotos((prev) => prev.filter((p) => p.id !== payload.old.id));
           }
         }
       )
@@ -240,625 +321,189 @@ export default function EventPhotoGalleryPage() {
     };
   }, [eventId]);
 
-  const filteredPhotos = useMemo(() => {
-    let result = photos.filter((p) => isHostMode || !p.is_hidden);
-    if (activeFilter === 'ranking') {
-      result.sort((a, b) => b.likes_count - a.likes_count);
-    } else if (activeFilter === 'pickup') {
-      return result.filter((p) => p.is_pickup);
-    } else if (activeFilter === 'mine') {
-      return result.filter((p) => p.user_id === userId);
-    }
-    return result;
-  }, [photos, activeFilter, userId, isHostMode]);
+  const activePhotos = useMemo(() => {
+    return photos.filter((p) => !p.is_hidden);
+  }, [photos]);
 
-  const toggleLike = async (photoId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  const slideshowPhotos = useMemo(() => {
+    if (activePhotos.length === 0) return [];
+    const pickups = activePhotos.filter((p) => p.is_pickup);
+    return pickups.length > 0 ? pickups : activePhotos;
+  }, [activePhotos]);
 
-    if (eventData.is_locked) {
-      alert('現在、いいねの投票は締め切られています');
-      return;
-    }
+  useEffect(() => {
+    if (slideshowPhotos.length <= 1 || isCeremonyOpen) return;
+    const timer = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % slideshowPhotos.length);
+    }, 5500);
+    return () => clearInterval(timer);
+  }, [slideshowPhotos.length, isCeremonyOpen]);
 
-    const isLiked = myLikedPhotoIds.includes(photoId);
+  const rankingPhotos = useMemo(() => {
+    return [...activePhotos].sort((a, b) => b.likes_count - a.likes_count).slice(0, 3);
+  }, [activePhotos]);
 
-    if (!isLiked && myLikedPhotoIds.length >= 3) {
-      alert('いいねは1人最大3枚までです！');
-      return;
-    }
+  const latestPhotos = useMemo(() => {
+    return activePhotos.slice(0, 4);
+  }, [activePhotos]);
 
-    setBouncingLikeId(photoId);
-    setTimeout(() => setBouncingLikeId(null), 300);
-
-    const nextLikes = isLiked
-      ? myLikedPhotoIds.filter((id) => id !== photoId)
-      : [...myLikedPhotoIds, photoId];
-
-    setMyLikedPhotoIds(nextLikes);
-    localStorage.setItem(`likes_${eventId}`, JSON.stringify(nextLikes));
-
-    setPhotos((prev) =>
-      prev.map((p) => {
-        if (p.id === photoId) {
-          return {
-            ...p,
-            likes_count: isLiked ? Math.max(0, p.likes_count - 1) : p.likes_count + 1,
-          };
-        }
-        return p;
-      })
-    );
-
-    try {
-      if (isLiked) {
-        await supabase
-          .from('photo_likes')
-          .delete()
-          .eq('event_id', eventId)
-          .eq('photo_id', photoId)
-          .eq('user_id', userId);
-      } else {
-        await supabase
-          .from('photo_likes')
-          .insert({ event_id: eventId, photo_id: photoId, user_id: userId });
-      }
-    } catch (err) {
-      console.error('Like error:', err);
-    }
-  };
-
-  const handleDownload = async (photo: Photo, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    try {
-      const downloadTargetUrl = photo.original_url || photo.public_url;
-      const response = await fetch(downloadTargetUrl);
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = `wedding_${photo.id.slice(0, 8)}.jpg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-
-      if (!savedPhotoIds.includes(photo.id)) {
-        const updatedSaves = [...savedPhotoIds, photo.id];
-        setSavedPhotoIds(updatedSaves);
-        localStorage.setItem(`saves_${eventId}`, JSON.stringify(updatedSaves));
-      }
-    } catch {
-      alert('画像の保存に失敗しました');
-    }
-  };
-
-  const executeUpload = async (file: File, nameToUse: string) => {
-    if (!file.type.startsWith('image/')) {
-      alert('画像ファイル（JPEG / PNG / WEBP / HEIC 等）のみアップロード可能です');
-      return;
-    }
-    if (file.size > 15 * 1024 * 1024) {
-      alert('写真のサイズが大きすぎます（15MB以下にしてください）');
-      return;
-    }
-
-    try {
-      setIsUploading(true);
-      setUploadProgressText('最適化中...');
-      setIsActionSheetOpen(false);
-
-      const timestamp = Date.now();
-      const rand = Math.random().toString(36).substring(2, 8);
-      const thumbFileName = `thumb_${eventId}_${timestamp}_${rand}.jpg`;
-      const originalFileName = `hd_${eventId}_${timestamp}_${rand}.jpg`;
-
-      const thumbBlob = await createThumbnailBlob(file, 600, 0.75);
-
-      setUploadProgressText('送信中...');
-      const { data: thumbData, error: thumbError } = await supabase.storage
-        .from('wedding-photos')
-        .upload(thumbFileName, thumbBlob, {
-          contentType: 'image/jpeg',
-          upsert: true,
-        });
-
-      if (thumbError) throw new Error(`送信失敗: ${thumbError.message}`);
-
-      const { data: { publicUrl: thumbPublicUrl } } = supabase.storage.from('wedding-photos').getPublicUrl(thumbData.path);
-
-      const { data: insertedPhoto, error: dbError } = await supabase
-        .from('photos')
-        .insert({
-          event_id: eventId,
-          storage_path: thumbData.path,
-          public_url: thumbPublicUrl,
-          thumb_url: thumbPublicUrl,
-          original_url: null,
-          is_hd_ready: false,
-          user_id: userId,
-          user_name: nameToUse || 'ゲスト',
-          likes_count: 0,
-          is_pickup: false,
-          is_hidden: false,
-        })
-        .select()
-        .single();
-
-      if (dbError) throw new Error(`DB保存失敗: ${dbError.message}`);
-
-      setIsUploading(false);
-      setUploadProgressText('');
-
-      (async () => {
-        try {
-          const { data: hdData, error: hdError } = await supabase.storage
-            .from('wedding-photos')
-            .upload(originalFileName, file, {
-              contentType: file.type || 'image/jpeg',
-              upsert: true,
-            });
-
-          if (!hdError && hdData) {
-            const { data: { publicUrl: hdPublicUrl } } = supabase.storage.from('wedding-photos').getPublicUrl(hdData.path);
-            await supabase
-              .from('photos')
-              .update({ original_url: hdPublicUrl, public_url: hdPublicUrl, is_hd_ready: true })
-              .eq('id', insertedPhoto.id);
-          }
-        } catch (bgErr) {
-          console.error('HD Upload Error:', bgErr);
-        }
-      })();
-    } catch (err: any) {
-      alert(err.message || 'アップロードに失敗しました');
-      setIsUploading(false);
-      setUploadProgressText('');
-    } finally {
-      if (cameraInputRef.current) cameraInputRef.current.value = '';
-      if (albumInputRef.current) albumInputRef.current.value = '';
-    }
-  };
-
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!userName.trim()) {
-      setPendingUploadFile(file);
-      setIsNameModalOpen(true);
-      setIsActionSheetOpen(false);
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
     } else {
-      executeUpload(file, userName);
+      document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
     }
   };
 
-  const handleSaveNameAndUpload = (e: React.FormEvent) => {
-    e.preventDefault();
-    const finalName = tempNameInput.trim() || 'ゲスト';
-    setUserName(finalName);
-    localStorage.setItem('wedding_guest_name', finalName);
-    setIsNameModalOpen(false);
-
-    if (pendingUploadFile) {
-      executeUpload(pendingUploadFile, finalName);
-      setPendingUploadFile(null);
-    }
-  };
-
-  const handleToggleLock = async () => {
-    const nextLocked = !eventData.is_locked;
-    setEventData((prev) => ({ ...prev, is_locked: nextLocked }));
-    await supabase.from('events').update({ is_locked: nextLocked }).eq('id', eventId);
-  };
-
-  const handleTogglePickup = async (photo: Photo, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const newStatus = !photo.is_pickup;
-    setPhotos((prev) => prev.map((p) => (p.id === photo.id ? { ...p, is_pickup: newStatus } : p)));
-    await supabase.from('photos').update({ is_pickup: newStatus }).eq('id', photo.id);
-  };
-
-  const handleToggleHide = async (photo: Photo, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const newHidden = !photo.is_hidden;
-    setPhotos((prev) => prev.map((p) => (p.id === photo.id ? { ...p, is_hidden: newHidden } : p)));
-    await supabase.from('photos').update({ is_hidden: newHidden }).eq('id', photo.id);
-  };
-
-  const handleDeletePhoto = async (photo: Photo, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!confirm('この写真を削除しますか？（復元できません）')) return;
-    setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
-    if (previewIndex !== null) setPreviewIndex(null);
-    await supabase.from('photos').delete().eq('id', photo.id);
-  };
-
-  const handleDownloadAllZip = async () => {
-    if (photos.length === 0) return alert('ダウンロード可能な写真がありません');
-    if (!confirm(`全 ${photos.length} 枚の高画質写真をZIP形式で一括保存しますか？`)) return;
-
-    try {
-      setIsZipping(true);
-      setZipProgress(0);
-
-      if (typeof window !== 'undefined' && !(window as any).JSZip) {
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-        document.body.appendChild(script);
-        await new Promise((resolve) => { script.onload = resolve; });
-      }
-
-      const JSZip = (window as any).JSZip;
-      const zip = new JSZip();
-      const folder = zip.folder(`wedding_photos_${eventId}`);
-
-      for (let i = 0; i < photos.length; i++) {
-        const photo = photos[i];
-        const targetUrl = photo.original_url || photo.public_url;
-        try {
-          const res = await fetch(targetUrl);
-          const blob = await res.blob();
-          const uploader = photo.user_name ? `_${photo.user_name}` : '';
-          folder.file(`photo_${i + 1}${uploader}_${photo.id.slice(0, 6)}.jpg`, blob);
-        } catch (e) {
-          console.error('Fetch error for zip:', photo.id, e);
-        }
-        setZipProgress(Math.round(((i + 1) / photos.length) * 100));
-      }
-
-      const zipBlob = await zip.generateAsync({ type: 'blob' });
-      const blobUrl = window.URL.createObjectURL(zipBlob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = `${eventData.title}_photos.zip`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-
-      alert('ZIPファイルのダウンロードが完了しました！');
-    } catch {
-      alert('ZIPの作成に失敗しました');
-    } finally {
-      setIsZipping(false);
-      setZipProgress(0);
-    }
-  };
-
-  const handleGenerateQrCard = () => {
+  const fireConfetti = useCallback(async () => {
     if (typeof window === 'undefined') return;
-    const canvas = document.createElement('canvas');
-    canvas.width = 1200;
-    canvas.height = 1600;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!(window as any).confetti) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js';
+      document.body.appendChild(script);
+      await new Promise((resolve) => { script.onload = resolve; });
+    }
+    const confetti = (window as any).confetti;
+    if (confetti) {
+      confetti({
+        particleCount: 150,
+        spread: 130,
+        origin: { y: 0.6 },
+        colors: ['#fbbf24', '#f59e0b', '#ec4899', '#ffffff'],
+      });
+    }
+  }, []);
 
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const handleSelectStep = (step: number) => {
+    setCeremonyStep(step);
+    if (isSoundEnabled) {
+      sounds.playDrumroll(1.2);
+    }
+    if (step === 1) {
+      setTimeout(() => {
+        fireConfetti();
+        if (isSoundEnabled) sounds.playFanfare();
+      }, 400);
+    }
+  };
 
-    ctx.strokeStyle = '#D4AF37';
-    ctx.lineWidth = 12;
-    ctx.strokeRect(60, 60, canvas.width - 120, canvas.height - 120);
+  const handleNextStep = () => {
+    if (ceremonyStep === 3) handleSelectStep(2);
+    else if (ceremonyStep === 2) handleSelectStep(1);
+  };
 
-    ctx.fillStyle = '#18181B';
-    ctx.font = 'italic 72px "Times New Roman", serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Wedding Photo Share', 600, 260);
+  const handlePrevStep = () => {
+    if (ceremonyStep === 1) handleSelectStep(2);
+    else if (ceremonyStep === 2) handleSelectStep(3);
+  };
 
-    ctx.font = 'bold 44px sans-serif';
-    ctx.fillStyle = '#3F3F46';
-    ctx.fillText(eventData.title, 600, 360);
-
-    ctx.font = '32px sans-serif';
-    ctx.fillStyle = '#71717A';
-    ctx.fillText('本日はご列席いただき誠にありがとうございます', 600, 460);
-    ctx.fillText('皆さまが撮影した素敵な写真をぜひ共有してください', 600, 520);
-
-    const qrImg = new Image();
-    qrImg.crossOrigin = 'anonymous';
-    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(window.location.href)}`;
-    qrImg.onload = () => {
-      ctx.drawImage(qrImg, 350, 640, 500, 500);
-
-      ctx.font = 'bold 36px sans-serif';
-      ctx.fillStyle = '#18181B';
-      ctx.fillText('QRコードをスマホのカメラで読み取って参加', 600, 1260);
-
-      ctx.font = '28px sans-serif';
-      ctx.fillStyle = '#A1A1AA';
-      ctx.fillText('アプリのインストールや面倒な登録は不要です', 600, 1340);
-
-      const cardUrl = canvas.toDataURL('image/jpeg', 0.95);
-      const link = document.createElement('a');
-      link.href = cardUrl;
-      link.download = `table_card_${eventId}.jpg`;
-      link.click();
-      alert('卓上案内カードの画像をダウンロードしました！\n印刷してテーブルに飾っていただけます。');
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isCeremonyOpen) return;
+      if (e.key === 'ArrowLeft') handlePrevStep();
+      if (e.key === 'ArrowRight' || e.key === ' ') handleNextStep();
+      if (e.key === 'Escape') setIsCeremonyOpen(false);
     };
-  };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCeremonyOpen, ceremonyStep]);
 
-  const handleVerifyPin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pinInput === eventData.host_pin) {
-      setIsHostMode(true);
-      sessionStorage.setItem(`host_auth_${eventId}`, 'true');
-      setIsPinModalOpen(false);
-      setIsDrawerOpen(false);
-      setPinInput('');
-    } else {
-      alert('PINコードが正しくありません');
-    }
-  };
-
-  const handleLogoutHost = () => {
-    setIsHostMode(false);
-    sessionStorage.removeItem(`host_auth_${eventId}`);
-    setIsDrawerOpen(false);
-  };
-
-  const currentPhoto = previewIndex !== null ? filteredPhotos[previewIndex] : null;
-
-  const handlePrevPreview = useCallback(() => {
-    if (previewIndex === null) return;
-    setPreviewIndex((prev) => (prev !== null && prev > 0 ? prev - 1 : filteredPhotos.length - 1));
-  }, [previewIndex, filteredPhotos.length]);
-
-  const handleNextPreview = useCallback(() => {
-    if (previewIndex === null) return;
-    setPreviewIndex((prev) => (prev !== null && prev < filteredPhotos.length - 1 ? prev + 1 : 0));
-  }, [previewIndex, filteredPhotos.length]);
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.targetTouches[0].clientX;
-    touchStartTime.current = Date.now();
-  };
-
-  const onTouchEnd = (e: React.TouchEvent) => {
-    const endX = e.changedTouches[0].clientX;
-    const diffX = endX - touchStartX.current;
-    const diffTime = Date.now() - touchStartTime.current;
-
-    if (diffTime < 350 && Math.abs(diffX) > 30) {
-      if (diffX < 0) handleNextPreview();
-      else handlePrevPreview();
-    }
-  };
+  const currentSlide = slideshowPhotos[currentIndex] || activePhotos[0];
+  const ceremonyTargetPhoto = rankingPhotos[ceremonyStep - 1];
 
   return (
-    <div className="min-h-screen bg-[#F7F5F0] flex justify-center selection:bg-amber-100 font-sans antialiased text-zinc-800">
-      <main className="w-full max-w-md min-h-screen bg-[#FDFCFB] relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6.5rem)] overflow-y-auto overflow-x-hidden border-x border-black/[0.04]">
-        {/* ホストモード稼働中バナー */}
-        {isHostMode && (
-          <div className="sticky top-0 z-50 bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 text-xs font-bold px-4 py-1.5 flex items-center justify-between shadow-md">
-            <span className="flex items-center space-x-1.5">
-              <Unlock className="w-3.5 h-3.5" />
-              <span>ホスト管理者モード中</span>
-            </span>
-            <button onClick={handleLogoutHost} className="underline text-[11px] font-bold">
-              終了
-            </button>
-          </div>
-        )}
-
-        {/* 投票締め切り告知バナー */}
-        {eventData.is_locked && (
-          <div className="bg-zinc-900 text-amber-300 text-xs font-bold px-4 py-2 flex items-center justify-center space-x-1.5 text-center shadow-md">
-            <AlertCircle className="w-3.5 h-3.5" />
-            <span>いいね投票は締め切られました（閲覧・保存は可能です）</span>
-          </div>
-        )}
-
-        {/* エレガント固定ヘッダー */}
-        <header className="sticky top-0 z-40 w-full bg-[#FDFCFB]/90 backdrop-blur-md border-b border-black/[0.05] px-5 py-3.5 flex items-center justify-between shadow-[0_1px_8px_rgba(0,0,0,0.02)]">
-          <div className="w-6" />
-          <h1 className="font-serif italic text-[clamp(1.2rem,4.8vw,1.45rem)] tracking-wider text-zinc-900 select-none font-medium text-center">
+    <div className="w-screen h-screen bg-zinc-950 text-white flex flex-col overflow-hidden select-none font-sans">
+      <header className="h-16 px-8 bg-zinc-900/80 backdrop-blur-md border-b border-zinc-800 flex items-center justify-between z-20 shrink-0">
+        <div className="flex items-center space-x-3">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+          <h1 className="font-serif italic text-2xl tracking-wider font-light text-zinc-100">
             {eventData.title}
           </h1>
-          <button
-            onClick={() => setIsDrawerOpen(true)}
-            className="text-zinc-700 hover:text-zinc-950 p-1.5 rounded-full hover:bg-black/5 active:scale-90 transition"
-            aria-label="メニューを開く"
-          >
-            <Menu className="w-6 h-6" strokeWidth={1.5} />
-          </button>
-        </header>
+          <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-medium ml-2">
+            LIVE SCREEN
+          </span>
+        </div>
 
-        {/* 3大円形ナビゲーション（ラグジュアリーカード） */}
-        <section className="flex justify-between items-center w-full px-6 py-4">
+        <div className="flex items-center space-x-4">
           <button
-            onClick={() => setActiveFilter(activeFilter === 'ranking' ? null : 'ranking')}
-            className={`w-[27%] max-w-[94px] aspect-square rounded-2xl bg-white flex flex-col items-center justify-center transition-all duration-200 active:scale-95 border ${
-              activeFilter === 'ranking'
-                ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-md bg-amber-50/30'
-                : 'border-black/[0.06] shadow-sm hover:shadow'
+            onClick={() => {
+              setCeremonyStep(3);
+              setIsCeremonyOpen(true);
+              if (isSoundEnabled) sounds.playDrumroll(1.2);
+            }}
+            className="px-5 py-2.5 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-zinc-950 font-black rounded-xl text-sm flex items-center space-x-2 shadow-xl shadow-amber-500/20 active:scale-95 transition"
+          >
+            <Trophy className="w-4 h-4" />
+            <span>🏆 表彰式・ランキング発表</span>
+          </button>
+
+          <button
+            onClick={() => setIsSoundEnabled(!isSoundEnabled)}
+            className={`p-2 rounded-lg border transition ${
+              isSoundEnabled ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' : 'bg-zinc-800 text-zinc-500 border-zinc-700'
             }`}
+            title={isSoundEnabled ? '効果音 ON' : '効果音 OFF'}
           >
-            <Trophy className="w-5 h-5 text-amber-500 mb-1" strokeWidth={1.7} />
-            <span className="text-[clamp(0.72rem,2.9vw,0.85rem)] font-bold text-zinc-700 tracking-tight">
-              Ranking
-            </span>
+            {isSoundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
           </button>
+
+          <span className="text-sm text-zinc-400">
+            投稿枚数: <strong className="text-white text-base">{activePhotos.length}</strong> 枚
+          </span>
 
           <button
-            onClick={() => setActiveFilter(activeFilter === 'pickup' ? null : 'pickup')}
-            className={`w-[27%] max-w-[94px] aspect-square rounded-2xl bg-white flex flex-col items-center justify-center transition-all duration-200 active:scale-95 border ${
-              activeFilter === 'pickup'
-                ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md bg-indigo-50/30'
-                : 'border-black/[0.06] shadow-sm hover:shadow'
-            }`}
+            onClick={toggleFullscreen}
+            className="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition text-zinc-300"
+            title="全画面表示"
           >
-            <Sparkles className="w-5 h-5 text-indigo-500 mb-1" strokeWidth={1.7} />
-            <span className="text-[clamp(0.72rem,2.9vw,0.85rem)] font-bold text-zinc-700 tracking-tight">
-              Pickup
-            </span>
+            {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
           </button>
+        </div>
+      </header>
 
-          <button
-            onClick={() => setActiveFilter(activeFilter === 'mine' ? null : 'mine')}
-            className={`w-[27%] max-w-[94px] aspect-square rounded-2xl bg-white flex flex-col items-center justify-center transition-all duration-200 active:scale-95 border ${
-              activeFilter === 'mine'
-                ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-md bg-emerald-50/30'
-                : 'border-black/[0.06] shadow-sm hover:shadow'
-            }`}
-          >
-            <User className="w-5 h-5 text-emerald-500 mb-1" strokeWidth={1.7} />
-            <span className="text-[clamp(0.72rem,2.9vw,0.85rem)] font-bold text-zinc-700 tracking-tight">
-              mine
-            </span>
-          </button>
-        </section>
+      <div className="flex-1 grid grid-cols-12 gap-6 p-6 overflow-hidden">
+        <div className="col-span-8 h-full relative rounded-3xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-2xl flex items-center justify-center">
+          {currentSlide ? (
+            <div className="relative w-full h-full flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-cover bg-center filter blur-3xl opacity-30 scale-110 transition-all duration-1000"
+                style={{ backgroundImage: `url(${currentSlide.public_url})` }}
+              />
 
-        {/* 洗練されたフォトギャラリー（カード型グリッド） */}
-        {filteredPhotos.length === 0 ? (
-          <div className="w-full px-3">
-            <div className="grid grid-cols-3 gap-2.5 w-full">
-              {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                <div
-                  key={i}
-                  className="w-full aspect-square rounded-2xl bg-black/[0.02] border border-dashed border-black/[0.08] flex flex-col items-center justify-center text-zinc-300"
-                >
-                  <Camera className="w-6 h-6 opacity-30 mb-1" strokeWidth={1.5} />
-                  <span className="text-[10px] opacity-40 font-mono">#{i + 1}</span>
-                </div>
-              ))}
-            </div>
-            <div className="py-14 text-center px-4">
-              <p className="text-sm font-bold text-zinc-700 mb-1">写真がまだありません</p>
-              <p className="text-xs text-zinc-400">
-                右下の「投稿する」ボタンから最初の想い出をシェアしてください
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-2 px-3 py-1 w-full">
-            {filteredPhotos.map((photo, index) => {
-              const isLiked = myLikedPhotoIds.includes(photo.id);
-              const isSaved = savedPhotoIds.includes(photo.id);
-              const displayUrl = photo.thumb_url || photo.public_url;
-              const isBouncing = bouncingLikeId === photo.id;
+              <img
+                key={currentSlide.id}
+                src={currentSlide.original_url || currentSlide.public_url}
+                alt="Slideshow"
+                className="relative z-10 max-h-full max-w-full object-contain rounded-2xl shadow-2xl animate-in fade-in duration-700"
+              />
 
-              return (
-                <div
-                  key={photo.id}
-                  onClick={() => setPreviewIndex(index)}
-                  className="w-full aspect-square relative rounded-2xl overflow-hidden bg-zinc-100 cursor-pointer select-none active:scale-[0.97] transition-all duration-200 shadow-sm hover:shadow border border-black/[0.04]"
-                >
-                  <img
-                    src={displayUrl}
-                    alt="Wedding photo"
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-
-                  {/* 左下いいね数（極細フロストガラスバッジ） */}
-                  <div className="absolute bottom-1.5 left-1.5 bg-black/40 backdrop-blur-md px-1.5 py-0.5 rounded-full flex items-center space-x-1 z-10 pointer-events-none">
-                    <span className="text-[10px] font-bold text-white">
-                      {photo.likes_count}
-                    </span>
-                  </div>
-
-                  {/* Pickupバッジ */}
-                  {photo.is_pickup && (
-                    <div className="absolute top-1.5 left-1.5 z-10 pointer-events-none drop-shadow-md">
-                      <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                    </div>
-                  )}
-
-                  {/* 非表示中バッジ */}
-                  {photo.is_hidden && (
-                    <div className="absolute top-1.5 left-1.5 z-10 bg-red-600/90 backdrop-blur-sm text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow">
-                      非表示中
-                    </div>
-                  )}
-
-                  {/* ホストモード時：投稿者名バッジ */}
-                  {isHostMode && photo.user_name && !photo.is_hidden && (
-                    <div className="absolute top-1.5 left-1.5 z-10 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded-md text-[9px] text-amber-300 font-bold max-w-[80%] truncate shadow-sm">
-                      {photo.user_name}
-                    </div>
-                  )}
-
-                  {/* 右下ハートトグル（弾けるアニメーション） */}
-                  <button
-                    onClick={(e) => toggleLike(photo.id, e)}
-                    className={`absolute bottom-1.5 right-1.5 z-20 p-1.5 rounded-full bg-black/30 backdrop-blur-md transition-transform duration-200 ${
-                      isBouncing ? 'scale-135' : 'active:scale-125'
-                    }`}
-                    aria-label="いいね"
-                  >
-                    <Heart
-                      className={`w-3.5 h-3.5 ${
-                        isLiked
-                          ? 'fill-rose-500 text-rose-500'
-                          : 'text-white'
-                      }`}
-                    />
-                  </button>
-
-                  {/* 右上保存済みバッジ */}
-                  {isSaved && (
-                    <div className="absolute top-1.5 right-1.5 z-10 pointer-events-none drop-shadow">
-                      <CheckCircle2 className="w-4 h-4 fill-emerald-500 text-white" />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </main>
-
-      {/* 🌟 没入型・全画面（フルスクリーン）プレビューモーダル */}
-      {currentPhoto && (
-        <div
-          className="fixed inset-0 z-50 bg-black flex flex-col justify-between select-none animate-in fade-in duration-150"
-          onTouchStart={onTouchStart}
-          onTouchEnd={onTouchEnd}
-        >
-          {/* 上部オーバーレイバー（極薄フロストガラス） */}
-          <div className="w-full z-20 bg-gradient-to-b from-black/80 via-black/40 to-transparent p-4 flex items-center justify-between text-white">
-            <div className="flex items-center space-x-2">
-              <span className="text-xs font-mono font-bold text-zinc-300 bg-white/10 px-3 py-1 rounded-full backdrop-blur-md border border-white/10">
-                {previewIndex! + 1} / {filteredPhotos.length}
-              </span>
-              {isHostMode && (
-                <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-1 rounded-full font-bold backdrop-blur-md">
-                  撮影者: {currentPhoto.user_name || 'ゲスト'} 様
+              <div className="absolute bottom-8 left-8 z-20 flex items-center space-x-3 bg-black/70 backdrop-blur-md px-5 py-2.5 rounded-2xl border border-white/10">
+                {currentSlide.is_pickup && (
+                  <span className="flex items-center space-x-1 text-amber-400 text-sm font-bold">
+                    <Sparkles className="w-4 h-4" />
+                    <span>新郎新婦 Pickup</span>
+                  </span>
+                )}
+                <span className="text-sm text-zinc-200 font-medium">
+                  📸 <strong>{currentSlide.user_name || 'ゲスト'}</strong> 様
                 </span>
-              )}
+                <div className="flex items-center space-x-1.5 text-pink-400 text-sm font-bold pl-2 border-l border-white/20">
+                  <Heart className="w-4 h-4 fill-pink-500" />
+                  <span>{currentSlide.likes_count}</span>
+                </div>
+              </div>
             </div>
-            <button
-              onClick={() => setPreviewIndex(null)}
-              className="p-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white active:scale-90 transition backdrop-blur-md border border-white/10"
-              aria-label="閉じる"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          ) : (
+            <div className="text-center text-zinc-600">
+              <p className="font-serif italic text-2xl mb-2">Waiting for photos...</p>
+              <p className="text-sm">QRコードから最初の写真を投稿してください</p>
+            </div>
+          )}
 
-          {/* 写真本体（全画面フルサイズ描画） */}
-          <div className="relative flex-1 w-full h-full flex items-center justify-center overflow-hidden">
-            <button
-              onClick={handlePrevPreview}
-              className="hidden sm:flex absolute left-4 z-20 p-3.5 rounded-full bg-black/40 text-white hover:bg-black/60 transition backdrop-blur-md border border-white/10"
-            >
-              <ChevronLeft className="w-6 h-6" />
-            </button>
-
-            <img
-              key={currentPhoto.id}
-              src={currentPhoto.original_url || currentPhoto.thumb_url || currentPhoto.public_url}
-              alt="Full view"
-              className="w-full h-full object-contain select-none animate-in zoom-in-95 duration-150"
-            />
-
-            <button
-              onClick={handleNextPreview}
-              className="hidden sm:flex absolute right-4 z-20 p-3.5 rounded-full bg-black/40 text-white hover:bg-black/60 transition backdrop-blur-md border border-white/10"
-            >
-              <ChevronRight className="w-6 h-6" />
-            </button>
-          </div>
-
-          {/* 下部オーバーレイ操作バー（薄い半透明フロストグラス） */}
-          <div className="w-full z-20 bg-gradient-to-t from
+          {newPostAlert && (
+            <div className="absolute inset-0 z-30 bg-black/85 backdrop-blur-lg flex flex-col items-center justify-center p-6 animate-in zoom-in-90 fade-in duration-300">
+              <div className="bg-gradient-to-r from-amber-500 to-rose-500 text-zinc-950 font-black text-sm px-5 py-1.5 rounded-full mb-3 shadow-xl flex items-center space-x-2">
+                <Sparkles className="w-4 h-4" />
+                <span>NEW PHOTO BY {newPostAlert.user_name || 'ゲスト'}！</span>
