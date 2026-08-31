@@ -122,7 +122,6 @@ export default function EventPhotoGalleryPage() {
   const [uploadProgressText, setUploadProgressText] = useState('');
   const [isZipping, setIsZipping] = useState(false);
   const [zipProgress, setZipProgress] = useState(0);
-
   const [bouncingLikeId, setBouncingLikeId] = useState<string | null>(null);
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -608,4 +607,420 @@ export default function EventPhotoGalleryPage() {
     setPreviewIndex((prev) => (prev !== null && prev < filteredPhotos.length - 1 ? prev + 1 : 0));
   }, [previewIndex, filteredPhotos.length]);
 
-  const onTouchStart = (e: React.TouchEvent)
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.targetTouches[0].clientX;
+    touchStartTime.current = Date.now();
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const endX = e.changedTouches[0].clientX;
+    const diffX = endX - touchStartX.current;
+    const diffTime = Date.now() - touchStartTime.current;
+
+    if (diffTime < 350 && Math.abs(diffX) > 30) {
+      if (diffX < 0) handleNextPreview();
+      else handlePrevPreview();
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F7F5F0] flex justify-center selection:bg-amber-100 font-sans antialiased text-zinc-800">
+      <main className="w-full max-w-md min-h-screen bg-[#FDFCFB] relative shadow-2xl pb-[calc(env(safe-area-inset-bottom)+6.5rem)] overflow-y-auto overflow-x-hidden border-x border-black/[0.04]">
+        {/* ホストモード稼働中バナー */}
+        {isHostMode && (
+          <div className="sticky top-0 z-50 bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 text-xs font-bold px-4 py-1.5 flex items-center justify-between shadow-md">
+            <span className="flex items-center space-x-1.5">
+              <Unlock className="w-3.5 h-3.5" />
+              <span>ホスト管理者モード中</span>
+            </span>
+            <button onClick={handleLogoutHost} className="underline text-[11px] font-bold">
+              終了
+            </button>
+          </div>
+        )}
+
+        {/* 投票締め切り告知バナー */}
+        {eventData.is_locked && (
+          <div className="bg-zinc-900 text-amber-300 text-xs font-bold px-4 py-2 flex items-center justify-center space-x-1.5 text-center shadow-md">
+            <AlertCircle className="w-3.5 h-3.5" />
+            <span>いいね投票は締め切られました（閲覧・保存は可能です）</span>
+          </div>
+        )}
+
+        {/* エレガント固定ヘッダー */}
+        <header className="sticky top-0 z-40 w-full bg-[#FDFCFB]/90 backdrop-blur-md border-b border-black/[0.05] px-5 py-3.5 flex items-center justify-between shadow-[0_1px_8px_rgba(0,0,0,0.02)]">
+          <div className="w-6" />
+          <h1 className="font-serif italic text-[clamp(1.2rem,4.8vw,1.45rem)] tracking-wider text-zinc-900 select-none font-medium text-center">
+            {eventData.title}
+          </h1>
+          <button
+            onClick={() => setIsDrawerOpen(true)}
+            className="text-zinc-700 hover:text-zinc-950 p-1.5 rounded-full hover:bg-black/5 active:scale-90 transition"
+            aria-label="メニューを開く"
+          >
+            <Menu className="w-6 h-6" strokeWidth={1.5} />
+          </button>
+        </header>
+
+        {/* 3大円形ナビゲーション */}
+        <section className="flex justify-between items-center w-full px-6 py-4">
+          <button
+            onClick={() => setActiveFilter(activeFilter === 'ranking' ? null : 'ranking')}
+            className={`w-[27%] max-w-[94px] aspect-square rounded-2xl bg-white flex flex-col items-center justify-center transition-all duration-200 active:scale-95 border ${
+              activeFilter === 'ranking'
+                ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-md bg-amber-50/30'
+                : 'border-black/[0.06] shadow-sm hover:shadow'
+            }`}
+          >
+            <Trophy className="w-5 h-5 text-amber-500 mb-1" strokeWidth={1.7} />
+            <span className="text-[clamp(0.72rem,2.9vw,0.85rem)] font-bold text-zinc-700 tracking-tight">
+              Ranking
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveFilter(activeFilter === 'pickup' ? null : 'pickup')}
+            className={`w-[27%] max-w-[94px] aspect-square rounded-2xl bg-white flex flex-col items-center justify-center transition-all duration-200 active:scale-95 border ${
+              activeFilter === 'pickup'
+                ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md bg-indigo-50/30'
+                : 'border-black/[0.06] shadow-sm hover:shadow'
+            }`}
+          >
+            <Sparkles className="w-5 h-5 text-indigo-500 mb-1" strokeWidth={1.7} />
+            <span className="text-[clamp(0.72rem,2.9vw,0.85rem)] font-bold text-zinc-700 tracking-tight">
+              Pickup
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveFilter(activeFilter === 'mine' ? null : 'mine')}
+            className={`w-[27%] max-w-[94px] aspect-square rounded-2xl bg-white flex flex-col items-center justify-center transition-all duration-200 active:scale-95 border ${
+              activeFilter === 'mine'
+                ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-md bg-emerald-50/30'
+                : 'border-black/[0.06] shadow-sm hover:shadow'
+            }`}
+          >
+            <User className="w-5 h-5 text-emerald-500 mb-1" strokeWidth={1.7} />
+            <span className="text-[clamp(0.72rem,2.9vw,0.85rem)] font-bold text-zinc-700 tracking-tight">
+              mine
+            </span>
+          </button>
+        </section>
+
+        {/* 洗練されたフォトギャラリー */}
+        {filteredPhotos.length === 0 ? (
+          <div className="w-full px-3">
+            <div className="grid grid-cols-3 gap-2.5 w-full">
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                <div
+                  key={i}
+                  className="w-full aspect-square rounded-2xl bg-black/[0.02] border border-dashed border-black/[0.08] flex flex-col items-center justify-center text-zinc-300"
+                >
+                  <Camera className="w-6 h-6 opacity-30 mb-1" strokeWidth={1.5} />
+                  <span className="text-[10px] opacity-40 font-mono">#{i + 1}</span>
+                </div>
+              ))}
+            </div>
+            <div className="py-14 text-center px-4">
+              <p className="text-sm font-bold text-zinc-700 mb-1">写真がまだありません</p>
+              <p className="text-xs text-zinc-400">
+                右下の「投稿する」ボタンから最初の想い出をシェアしてください
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2 px-3 py-1 w-full">
+            {filteredPhotos.map((photo, index) => {
+              const isLiked = myLikedPhotoIds.includes(photo.id);
+              const isSaved = savedPhotoIds.includes(photo.id);
+              const displayUrl = photo.thumb_url || photo.public_url;
+              const isBouncing = bouncingLikeId === photo.id;
+
+              return (
+                <div
+                  key={photo.id}
+                  onClick={() => setPreviewIndex(index)}
+                  className="w-full aspect-square relative rounded-2xl overflow-hidden bg-zinc-100 cursor-pointer select-none active:scale-[0.97] transition-all duration-200 shadow-sm hover:shadow border border-black/[0.04]"
+                >
+                  <img
+                    src={displayUrl}
+                    alt="Wedding photo"
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+
+                  <div className="absolute bottom-1.5 left-1.5 bg-black/40 backdrop-blur-md px-1.5 py-0.5 rounded-full flex items-center space-x-1 z-10 pointer-events-none">
+                    <span className="text-[10px] font-bold text-white">
+                      {photo.likes_count}
+                    </span>
+                  </div>
+
+                  {photo.is_pickup && (
+                    <div className="absolute top-1.5 left-1.5 z-10 pointer-events-none drop-shadow-md">
+                      <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                    </div>
+                  )}
+
+                  {photo.is_hidden && (
+                    <div className="absolute top-1.5 left-1.5 z-10 bg-red-600/90 backdrop-blur-sm text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow">
+                      非表示中
+                    </div>
+                  )}
+
+                  {isHostMode && photo.user_name && !photo.is_hidden && (
+                    <div className="absolute top-1.5 left-1.5 z-10 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded-md text-[9px] text-amber-300 font-bold max-w-[80%] truncate shadow-sm">
+                      {photo.user_name}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={(e) => toggleLike(photo.id, e)}
+                    className={`absolute bottom-1.5 right-1.5 z-20 p-1.5 rounded-full bg-black/30 backdrop-blur-md transition-transform duration-200 ${
+                      isBouncing ? 'scale-135' : 'active:scale-125'
+                    }`}
+                    aria-label="いいね"
+                  >
+                    <Heart
+                      className={`w-3.5 h-3.5 ${
+                        isLiked
+                          ? 'fill-rose-500 text-rose-500'
+                          : 'text-white'
+                      }`}
+                    />
+                  </button>
+
+                  {isSaved && (
+                    <div className="absolute top-1.5 right-1.5 z-10 pointer-events-none drop-shadow">
+                      <CheckCircle2 className="w-4 h-4 fill-emerald-500 text-white" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {/* 全画面プレビューモーダル */}
+      {currentPhoto && (
+        <div
+          className="fixed inset-0 z-50 bg-black flex flex-col justify-between select-none animate-in fade-in duration-150"
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+        >
+          <div className="w-full z-20 bg-gradient-to-b from-black/80 via-black/40 to-transparent p-4 flex items-center justify-between text-white">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-mono font-bold text-zinc-300 bg-white/10 px-3 py-1 rounded-full backdrop-blur-md border border-white/10">
+                {previewIndex! + 1} / {filteredPhotos.length}
+              </span>
+              {isHostMode && (
+                <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-1 rounded-full font-bold backdrop-blur-md">
+                  撮影者: {currentPhoto.user_name || 'ゲスト'} 様
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => setPreviewIndex(null)}
+              className="p-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white active:scale-90 transition backdrop-blur-md border border-white/10"
+              aria-label="閉じる"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="relative flex-1 w-full h-full flex items-center justify-center overflow-hidden">
+            <button
+              onClick={handlePrevPreview}
+              className="hidden sm:flex absolute left-4 z-20 p-3.5 rounded-full bg-black/40 text-white hover:bg-black/60 transition backdrop-blur-md border border-white/10"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+
+            <img
+              key={currentPhoto.id}
+              src={currentPhoto.original_url || currentPhoto.thumb_url || currentPhoto.public_url}
+              alt="Full view"
+              className="w-full h-full object-contain select-none animate-in zoom-in-95 duration-150"
+            />
+
+            <button
+              onClick={handleNextPreview}
+              className="hidden sm:flex absolute right-4 z-20 p-3.5 rounded-full bg-black/40 text-white hover:bg-black/60 transition backdrop-blur-md border border-white/10"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          </div>
+
+          <div className="w-full z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5 pb-[calc(env(safe-area-inset-bottom)+1.8rem)] flex items-center justify-between text-white">
+            <button
+              onClick={() => toggleLike(currentPhoto.id)}
+              className={`flex items-center space-x-2 bg-white/15 hover:bg-white/25 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/10 transition ${
+                bouncingLikeId === currentPhoto.id ? 'scale-110' : 'active:scale-95'
+              }`}
+            >
+              <Heart
+                className={`w-5 h-5 ${
+                  myLikedPhotoIds.includes(currentPhoto.id)
+                    ? 'fill-rose-500 text-rose-500'
+                    : 'text-zinc-200'
+                }`}
+              />
+              <span className="font-bold text-sm text-white">{currentPhoto.likes_count}</span>
+            </button>
+
+            <button
+              onClick={() => handleDownload(currentPhoto)}
+              className="flex items-center space-x-1.5 px-5 py-2.5 bg-white/20 hover:bg-white/30 active:scale-95 backdrop-blur-md text-white rounded-2xl text-xs font-bold transition border border-white/10"
+            >
+              <Download className="w-4 h-4" />
+              <span>{savedPhotoIds.includes(currentPhoto.id) ? '保存済み' : '高画質保存'}</span>
+            </button>
+
+            {isHostMode && (
+              <div className="flex items-center space-x-2 pl-2 border-l border-white/20">
+                <button
+                  onClick={() => handleTogglePickup(currentPhoto)}
+                  className={`p-2.5 rounded-2xl backdrop-blur-md border border-white/10 transition ${
+                    currentPhoto.is_pickup
+                      ? 'bg-amber-400 text-zinc-950 font-bold border-amber-300'
+                      : 'bg-white/15 text-white'
+                  }`}
+                  title="Pickup"
+                >
+                  <Star className="w-4 h-4" />
+                </button>
+
+                <button
+                  onClick={() => handleToggleHide(currentPhoto)}
+                  className={`p-2.5 rounded-2xl backdrop-blur-md border border-white/10 transition ${
+                    currentPhoto.is_hidden
+                      ? 'bg-red-500 text-white'
+                      : 'bg-white/15 text-white'
+                  }`}
+                  title={currentPhoto.is_hidden ? '非表示解除' : 'プロジェクター非表示'}
+                >
+                  <EyeOff className="w-4 h-4" />
+                </button>
+
+                <button
+                  onClick={() => handleDeletePhoto(currentPhoto)}
+                  className="p-2.5 rounded-2xl bg-red-600/80 backdrop-blur-md text-white active:scale-95 transition border border-red-500/50"
+                  title="削除"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 隠しインプット */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFileSelected}
+        className="hidden"
+      />
+      <input
+        ref={albumInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileSelected}
+        className="hidden"
+      />
+
+      {/* FAB */}
+      <button
+        disabled={isUploading}
+        onClick={() => setIsActionSheetOpen(true)}
+        className={`fixed bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] right-4 sm:right-[max(1rem,calc(50%-224px+1rem))] z-40 h-14 px-6 rounded-full bg-zinc-900 text-white shadow-[0_8px_25px_rgba(0,0,0,0.25)] flex items-center justify-center space-x-2 border border-zinc-700/80 active:scale-95 transition-all ${
+          isUploading ? 'opacity-90' : ''
+        }`}
+        aria-label="写真を追加"
+      >
+        {isUploading ? (
+          <>
+            <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+            <span className="text-xs font-bold tracking-wide">{uploadProgressText}</span>
+          </>
+        ) : (
+          <>
+            <Camera className="w-5 h-5 text-amber-400" strokeWidth={1.8} />
+            <span className="text-xs font-bold tracking-wider">投稿する</span>
+          </>
+        )}
+      </button>
+
+      {/* 写真追加シート */}
+      {isActionSheetOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end items-center bg-black/50 backdrop-blur-[2px]">
+          <div className="absolute inset-0" onClick={() => setIsActionSheetOpen(false)} />
+          <div className="relative w-full max-w-md bg-white rounded-t-3xl p-6 shadow-2xl z-10 space-y-3 pb-[calc(env(safe-area-inset-bottom)+1.8rem)] animate-in slide-in-from-bottom duration-150">
+            <div className="w-10 h-1 bg-zinc-200 rounded-full mx-auto mb-2" />
+            <h3 className="text-center font-serif italic text-lg text-zinc-900 mb-4">Share Your Memories</h3>
+
+            <button
+              onClick={() => cameraInputRef.current?.click()}
+              className="w-full py-3.5 px-4 bg-zinc-900 text-white rounded-2xl font-bold text-sm flex items-center justify-center space-x-2 active:scale-98 transition shadow"
+            >
+              <Camera className="w-5 h-5 text-amber-400" />
+              <span>カメラで写真を撮る</span>
+            </button>
+
+            <button
+              onClick={() => albumInputRef.current?.click()}
+              className="w-full py-3.5 px-4 bg-zinc-100 text-zinc-800 rounded-2xl font-bold text-sm flex items-center justify-center space-x-2 active:scale-98 transition"
+            >
+              <Sparkles className="w-5 h-5 text-indigo-500" />
+              <span>アルバムから選ぶ</span>
+            </button>
+
+            <button
+              onClick={() => setIsActionSheetOpen(false)}
+              className="w-full py-3 text-zinc-400 font-medium text-xs active:text-zinc-600 transition"
+            >
+              キャンセル
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* お名前入力モーダル */}
+      {isNameModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-7 w-full max-w-xs shadow-2xl space-y-5 border border-black/[0.04]">
+            <div className="text-center">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3 border border-amber-200/60">
+                <UserCheck className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-zinc-900 text-base">お名前の登録</h3>
+              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                新郎新婦へ伝わるお名前やニックネームをご入力ください
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveNameAndUpload} className="space-y-4">
+              <input
+                type="text"
+                maxLength={20}
+                value={tempNameInput}
+                onChange={(e) => setTempNameInput(e.target.value)}
+                placeholder="例: 山田 / 新婦友人 あやか"
+                className="w-full text-center text-sm font-bold py-3 bg-zinc-100 rounded-2xl border-none focus:ring-2 focus:ring-zinc-800"
+                autoFocus
+                required
+              />
+
+              <div className="flex space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsNameModalOpen(false);
+                    setPendingUploadFile(null);
+                  }}
+                  className="w-1/3 py-3 text-xs font-bold text-zinc-500 bg-zinc-100 rounded-2xl"
+                >
+                  中止
