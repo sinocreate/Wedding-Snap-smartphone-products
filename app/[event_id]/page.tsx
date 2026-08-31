@@ -1024,3 +1024,226 @@ export default function EventPhotoGalleryPage() {
                   className="w-1/3 py-3 text-xs font-bold text-zinc-500 bg-zinc-100 rounded-2xl"
                 >
                   中止
+                </button>
+                <button
+                  type="submit"
+                  className="w-2/3 py-3 text-xs font-bold text-white bg-zinc-900 rounded-2xl shadow"
+                >
+                  決定して投稿
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ドロワーメニュー */}
+      {isDrawerOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-[1px] transition-opacity"
+            onClick={() => setIsDrawerOpen(false)}
+          />
+          <aside className="relative w-[80%] max-w-[320px] h-full bg-[#FDFCFB] shadow-2xl p-6 flex flex-col justify-between z-10 overflow-y-auto">
+            <div>
+              <div className="flex items-center justify-between pb-4 border-b border-black/[0.05]">
+                <h2 className="font-serif italic font-bold text-zinc-900 text-xl tracking-wider">Menu</h2>
+                <button
+                  onClick={() => setIsDrawerOpen(false)}
+                  className="p-1 text-zinc-500 hover:text-zinc-800"
+                >
+                  <X className="w-6 h-6" strokeWidth={1.5} />
+                </button>
+              </div>
+
+              <div className="mt-4 p-3.5 bg-zinc-50/80 rounded-2xl flex items-center justify-between border border-black/[0.04]">
+                <div>
+                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Guest Name</p>
+                  <p className="text-sm font-bold text-zinc-800">{userName || '未設定（ゲスト）'}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setTempNameInput(userName);
+                    setIsNameModalOpen(true);
+                  }}
+                  className="text-xs text-amber-600 font-bold underline"
+                >
+                  変更
+                </button>
+              </div>
+
+              <nav className="mt-6 space-y-2.5">
+                <button
+                  onClick={() => {
+                    setIsDrawerOpen(false);
+                    setIsQrModalOpen(true);
+                  }}
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-3 text-left font-medium active:bg-zinc-100 rounded-xl transition"
+                >
+                  <QrCode className="w-5 h-5 text-zinc-500" />
+                  <span className="text-sm">参加用QRコード</span>
+                </button>
+
+                <a
+                  href={`/${eventId}/projector`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-3 text-left font-medium active:bg-zinc-100 rounded-xl transition"
+                >
+                  <Monitor className="w-5 h-5 text-indigo-500" />
+                  <span className="text-sm">プロジェクター投影画面</span>
+                </a>
+
+                {isHostMode && (
+                  <>
+                    <div className="pt-3 pb-1 border-t border-black/[0.05]">
+                      <p className="text-[10px] text-amber-600 font-bold uppercase tracking-wider px-3">
+                        Host Controls
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={handleToggleLock}
+                      className={`flex items-center space-x-3 w-full py-2.5 px-3 text-left font-bold rounded-xl text-sm transition ${
+                        eventData.is_locked ? 'bg-amber-100/70 text-amber-950' : 'text-zinc-700 hover:bg-zinc-100'
+                      }`}
+                    >
+                      <Lock className="w-5 h-5 text-amber-600" />
+                      <span>{eventData.is_locked ? '投票ロック中（解除）' : 'いいね投票を締め切る'}</span>
+                    </button>
+
+                    <button
+                      onClick={handleGenerateQrCard}
+                      className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-3 text-left font-medium active:bg-zinc-100 rounded-xl transition text-sm"
+                    >
+                      <Printer className="w-5 h-5 text-zinc-600" />
+                      <span>卓上案内カードを保存</span>
+                    </button>
+
+                    <button
+                      disabled={isZipping}
+                      onClick={handleDownloadAllZip}
+                      className="flex items-center space-x-3 text-amber-700 w-full py-2.5 px-3 text-left font-bold active:bg-amber-50 rounded-xl text-sm transition"
+                    >
+                      <Archive className="w-5 h-5" />
+                      <span>{isZipping ? `ZIP作成中 (${zipProgress}%)` : '全写真一括ダウンロード'}</span>
+                    </button>
+                  </>
+                )}
+
+                <button
+                  onClick={() => {
+                    setIsDrawerOpen(false);
+                    if (isHostMode) {
+                      handleLogoutHost();
+                    } else {
+                      setIsPinModalOpen(true);
+                    }
+                  }}
+                  className="flex items-center space-x-3 text-zinc-700 w-full py-2.5 px-3 text-left font-medium active:bg-zinc-100 rounded-xl pt-2.5 border-t border-black/[0.05] transition text-sm"
+                >
+                  {isHostMode ? (
+                    <>
+                      <Unlock className="w-5 h-5 text-amber-500" />
+                      <span>ホスト管理を終了</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-5 h-5 text-zinc-500" />
+                      <span>ホスト管理者ログイン</span>
+                    </>
+                  )}
+                </button>
+              </nav>
+            </div>
+
+            <div className="text-[11px] text-zinc-400 space-y-1 pt-6 font-mono">
+              <p>Guest: {userId.slice(0, 8)}...</p>
+              <p>Wedding Snap Pro v1.2</p>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* ホストPIN認証モーダル */}
+      {isPinModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-7 w-full max-w-xs shadow-2xl space-y-4">
+            <div className="text-center">
+              <Lock className="w-8 h-8 text-zinc-800 mx-auto mb-2" />
+              <h3 className="font-bold text-zinc-900 text-base">ホスト管理認証</h3>
+              <p className="text-xs text-zinc-400 mt-1">4桁のホストPINを入力してください</p>
+            </div>
+
+            <form onSubmit={handleVerifyPin} className="space-y-4">
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={8}
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                placeholder="PINコード (初期: 1234)"
+                className="w-full text-center tracking-widest text-2xl font-bold py-3 bg-zinc-100 rounded-2xl border-none focus:ring-2 focus:ring-zinc-800"
+                autoFocus
+              />
+
+              <div className="flex space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPinModalOpen(false)}
+                  className="w-1/2 py-3 text-xs font-bold text-zinc-500 bg-zinc-100 rounded-2xl"
+                >
+                  閉じる
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-3 text-xs font-bold text-white bg-zinc-900 rounded-2xl shadow"
+                >
+                  ロック解除
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* QRコードモーダル */}
+      {isQrModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl text-center space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-zinc-900 text-sm">会場配布用QRコード</h3>
+              <button onClick={() => setIsQrModalOpen(false)} className="p-1 text-zinc-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-zinc-50 rounded-2xl flex justify-center border border-zinc-100">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                  typeof window !== 'undefined' ? window.location.href : ''
+                )}`}
+                alt="QR Code"
+                className="w-48 h-48 rounded-lg"
+              />
+            </div>
+
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  navigator.clipboard.writeText(window.location.href);
+                  alert('URLをコピーしました！');
+                }
+              }}
+              className="w-full py-3 bg-zinc-900 text-white rounded-2xl text-xs font-bold flex items-center justify-center space-x-2 active:scale-98 transition shadow"
+            >
+              <Copy className="w-4 h-4" />
+              <span>参加URLをコピー</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
